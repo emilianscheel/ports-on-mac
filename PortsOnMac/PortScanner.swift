@@ -5,8 +5,17 @@ struct PortGroup {
     let entries: [PortEntry]
 
     var title: String {
-        let commands = Array(Set(entries.map(\.command))).sorted().prefix(3).joined(separator: ", ")
+        let commands = Array(Set(entries.map(\.displayCommand))).sorted().prefix(3).joined(separator: ", ")
         return ":\(port)  \(commands)"
+    }
+}
+
+struct DockerContainer {
+    let id: String
+    let name: String
+
+    var title: String {
+        "\(name) (\(id))"
     }
 }
 
@@ -21,19 +30,37 @@ struct PortEntry {
     let remoteEndpoint: String?
     let state: String?
     let port: Int
+    let dockerContainers: [DockerContainer]
+
+    var displayCommand: String {
+        if isDockerDesktopProxy {
+            return "Docker Desktop"
+        }
+
+        return command
+    }
+
+    var isDockerDesktopProxy: Bool {
+        let normalized = command.lowercased()
+        return normalized.hasPrefix("com.docke") || normalized.contains("docker")
+    }
 
     var processTitle: String {
-        "\(command)  pid \(pid)"
+        "\(displayCommand)  pid \(pid)"
     }
 
     var details: [String] {
         var values = [
-            "Command: \(command)",
+            "Command: \(displayCommand)",
             "PID: \(pid)",
             "User: \(user)",
             "Protocol: \(protocolName)",
             "Local: \(localEndpoint)"
         ]
+
+        if !dockerContainers.isEmpty {
+            values.append("Container: \(dockerContainers.map(\.title).joined(separator: ", "))")
+        }
 
         if let remoteEndpoint, !remoteEndpoint.isEmpty {
             values.append("Remote: \(remoteEndpoint)")
@@ -49,9 +76,25 @@ struct PortEntry {
     }
 
     var openURL: URL? {
-        guard protocolName == "TCP" || protocolName == "UDP" else { return nil }
+        guard protocolName == "TCP" else { return nil }
         guard let host = localHostForBrowser(from: localEndpoint) else { return nil }
         return URL(string: "http://\(host):\(port)")
+    }
+
+    func enriched(with containers: [DockerContainer]) -> PortEntry {
+        PortEntry(
+            command: command,
+            pid: pid,
+            user: user,
+            fileDescriptor: fileDescriptor,
+            socketType: socketType,
+            protocolName: protocolName,
+            localEndpoint: localEndpoint,
+            remoteEndpoint: remoteEndpoint,
+            state: state,
+            port: port,
+            dockerContainers: containers
+        )
     }
 
     private func localHostForBrowser(from endpoint: String) -> String? {
@@ -85,12 +128,18 @@ struct PortEntry {
 }
 
 final class PortScanner {
+    private let dockerMetadataProvider = DockerMetadataProvider()
+
     func scan() -> [PortGroup] {
         let output = runLsof()
+        let dockerContainersByPort = dockerMetadataProvider.containersByPublishedPort()
         let entries = output
             .split(separator: "\n")
             .dropFirst()
             .compactMap(parseLine)
+            .map { entry in
+                entry.enriched(with: dockerContainersByPort[entry.port] ?? [])
+            }
 
         let grouped = Dictionary(grouping: entries, by: \.port)
         return grouped
@@ -98,12 +147,16 @@ final class PortScanner {
             .sorted { $0.port < $1.port }
     }
 
+    func debugRawLsofOutput() -> String {
+        runLsof()
+    }
+
     private func runLsof() -> String {
         let process = Process()
         let pipe = Pipe()
 
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        process.arguments = ["-nP", "-iTCP", "-iUDP"]
+        process.arguments = ["-nP", "-iTCP", "-sTCP:LISTEN", "-iUDP"]
         process.standardOutput = pipe
         process.standardError = Pipe()
 
@@ -128,14 +181,8 @@ final class PortScanner {
         let user = String(columns[2])
         let fileDescriptor = String(columns[3])
         let socketType = String(columns[4])
-        var name = String(columns[8])
-
-        guard let protocolName = name.split(separator: " ", maxSplits: 1).first.map(String.init) else {
-            return nil
-        }
-
-        name.removeFirst(protocolName.count)
-        name = name.trimmingCharacters(in: CharacterSet.whitespaces)
+        let protocolName = String(columns[7])
+        let name = String(columns[8]).trimmingCharacters(in: CharacterSet.whitespaces)
 
         let state = extractState(from: name)
         let endpointText = removeState(from: name)
@@ -155,7 +202,8 @@ final class PortScanner {
             localEndpoint: localEndpoint,
             remoteEndpoint: remoteEndpoint,
             state: state,
-            port: port
+            port: port,
+            dockerContainers: []
         )
     }
 
@@ -168,7 +216,7 @@ final class PortScanner {
 
     private func removeState(from text: String) -> String {
         guard let open = text.lastIndex(of: "("), text.hasSuffix(")") else { return text }
-        return text[..<open].trimmingCharacters(in: .whitespaces)
+        return text[..<open].trimmingCharacters(in: CharacterSet.whitespaces)
     }
 
     private func extractPort(from endpoint: String) -> Int? {
@@ -179,12 +227,91 @@ final class PortScanner {
     }
 
     private func sortEntries(_ lhs: PortEntry, _ rhs: PortEntry) -> Bool {
-        if lhs.command != rhs.command { return lhs.command < rhs.command }
+        if lhs.displayCommand != rhs.displayCommand { return lhs.displayCommand < rhs.displayCommand }
         if lhs.pid != rhs.pid { return lhs.pid < rhs.pid }
         return lhs.localEndpoint < rhs.localEndpoint
     }
 
     private func unescape(_ value: String) -> String {
         value.replacingOccurrences(of: "\\x20", with: " ")
+    }
+}
+
+private final class DockerMetadataProvider {
+    func containersByPublishedPort() -> [Int: [DockerContainer]] {
+        guard let output = runDockerPS(), !output.isEmpty else { return [:] }
+
+        var containersByPort: [Int: [DockerContainer]] = [:]
+        for line in output.split(separator: "\n") {
+            let columns = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+            guard columns.count == 3 else { continue }
+
+            let id = String(columns[0])
+            let name = String(columns[1])
+            let ports = String(columns[2])
+            let container = DockerContainer(id: id, name: name)
+
+            for port in publishedHostPorts(from: ports) {
+                containersByPort[port, default: []].append(container)
+            }
+        }
+
+        return containersByPort
+    }
+
+    private func runDockerPS() -> String? {
+        guard let dockerPath = dockerExecutablePath() else { return nil }
+
+        let process = Process()
+        let output = Pipe()
+
+        process.executableURL = URL(fileURLWithPath: dockerPath)
+        process.arguments = ["ps", "--format", "{{.ID}}\t{{.Names}}\t{{.Ports}}"]
+        process.standardOutput = output
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func dockerExecutablePath() -> String? {
+        let candidates = [
+            "/opt/homebrew/bin/docker",
+            "/usr/local/bin/docker",
+            "/usr/bin/docker"
+        ]
+
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    private func publishedHostPorts(from ports: String) -> [Int] {
+        ports
+            .components(separatedBy: ",")
+            .compactMap { publishedHostPort(from: $0.trimmingCharacters(in: CharacterSet.whitespaces)) }
+    }
+
+    private func publishedHostPort(from mapping: String) -> Int? {
+        guard let arrowRange = mapping.range(of: "->") else { return nil }
+
+        let hostSide = String(mapping[..<arrowRange.lowerBound])
+        let portText: String
+
+        if let colon = hostSide.lastIndex(of: ":") {
+            portText = String(hostSide[hostSide.index(after: colon)...])
+        } else {
+            portText = hostSide
+        }
+
+        guard !portText.contains("-") else { return nil }
+        return Int(portText)
     }
 }
