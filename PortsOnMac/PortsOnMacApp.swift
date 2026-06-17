@@ -12,10 +12,13 @@ struct PortsOnMacApp: App {
 
         guard CommandLine.arguments.contains("--debug-scan") else { return }
 
-        for group in PortScanner().scan() {
-            print(group.title)
-            for entry in group.entries {
-                print("  \(entry.processTitle) \(entry.localEndpoint)")
+        for section in PortScanner().scan() {
+            print(section.direction.title)
+            for group in section.groups {
+                print(group.title)
+                for entry in group.entries {
+                    print("  \(entry.processTitle) \(entry.localEndpoint)")
+                }
             }
         }
 

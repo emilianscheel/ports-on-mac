@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let scanner = PortScanner()
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
+    private var showOutboundPorts = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -29,20 +30,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func rebuildMenu() {
         menu.removeAllItems()
 
-        let groups = scanner.scan()
-        if groups.isEmpty {
+        let sections = scanner.scan().filter { section in
+            section.direction == .inbound || showOutboundPorts
+        }
+
+        if sections.allSatisfy(\.groups.isEmpty) {
             let emptyItem = NSMenuItem(title: "No ports found", action: nil, keyEquivalent: "")
             emptyItem.isEnabled = false
             menu.addItem(emptyItem)
         } else {
-            for group in groups {
-                let item = NSMenuItem(title: group.title, action: nil, keyEquivalent: "")
-                item.submenu = makePortMenu(for: group)
-                menu.addItem(item)
+            for (index, section) in sections.enumerated() {
+                if index > 0 {
+                    menu.addItem(.separator())
+                }
+
+                addSection(section, to: menu)
             }
         }
 
         menu.addItem(.separator())
+
+        let outboundToggleItem = NSMenuItem(
+            title: showOutboundPorts ? "Hide Outbound Ports" : "Show Outbound Ports",
+            action: #selector(toggleOutboundPorts),
+            keyEquivalent: ""
+        )
+        outboundToggleItem.target = self
+        outboundToggleItem.image = NSImage(
+            systemSymbolName: showOutboundPorts ? "eye.slash" : "eye",
+            accessibilityDescription: showOutboundPorts ? "Hide Outbound Ports" : "Show Outbound Ports"
+        )
+        menu.addItem(outboundToggleItem)
 
         let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refresh), keyEquivalent: "r")
         refreshItem.target = self
@@ -55,7 +73,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(quitItem)
     }
 
+    private func addSection(_ section: PortSection, to menu: NSMenu) {
+        let titleItem = NSMenuItem(title: section.direction.title, action: nil, keyEquivalent: "")
+        titleItem.isEnabled = false
+        menu.addItem(titleItem)
+
+        if section.groups.isEmpty {
+            let emptyItem = NSMenuItem(title: section.direction.emptyTitle, action: nil, keyEquivalent: "")
+            emptyItem.isEnabled = false
+            menu.addItem(emptyItem)
+            return
+        }
+
+        for group in section.groups {
+            let item = NSMenuItem(title: group.title, action: nil, keyEquivalent: "")
+            item.submenu = makePortMenu(for: group)
+            menu.addItem(item)
+        }
+    }
+
     private func makePortMenu(for group: PortGroup) -> NSMenu {
+        if group.hasSingleProcess, let entry = group.entries.first {
+            return makeProcessMenu(for: entry)
+        }
+
         let portMenu = NSMenu()
 
         for entry in group.entries {
@@ -97,6 +138,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func refresh() {
+        rebuildMenu()
+    }
+
+    @objc private func toggleOutboundPorts() {
+        showOutboundPorts.toggle()
         rebuildMenu()
     }
 

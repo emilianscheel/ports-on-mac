@@ -1,12 +1,45 @@
 import Foundation
 
+enum PortDirection: CaseIterable {
+    case inbound
+    case outbound
+
+    var title: String {
+        switch self {
+        case .inbound:
+            return "Inbound"
+        case .outbound:
+            return "Outbound"
+        }
+    }
+
+    var emptyTitle: String {
+        switch self {
+        case .inbound:
+            return "No inbound ports"
+        case .outbound:
+            return "No outbound ports"
+        }
+    }
+}
+
+struct PortSection {
+    let direction: PortDirection
+    let groups: [PortGroup]
+}
+
 struct PortGroup {
+    let direction: PortDirection
     let port: Int
     let entries: [PortEntry]
 
     var title: String {
         let commands = Array(Set(entries.map(\.displayCommand))).sorted().prefix(3).joined(separator: ", ")
         return ":\(port)  \(commands)"
+    }
+
+    var hasSingleProcess: Bool {
+        Set(entries.map(\.processIdentity)).count == 1
     }
 }
 
@@ -30,6 +63,7 @@ struct PortEntry {
     let remoteEndpoint: String?
     let state: String?
     let port: Int
+    let direction: PortDirection
     let dockerContainers: [DockerContainer]
 
     var displayCommand: String {
@@ -49,11 +83,16 @@ struct PortEntry {
         "\(displayCommand)  pid \(pid)"
     }
 
+    var processIdentity: String {
+        "\(displayCommand)#\(pid)"
+    }
+
     var details: [String] {
         var values = [
             "Command: \(displayCommand)",
             "PID: \(pid)",
             "User: \(user)",
+            "Direction: \(direction.title)",
             "Protocol: \(protocolName)",
             "Local: \(localEndpoint)"
         ]
@@ -93,6 +132,7 @@ struct PortEntry {
             remoteEndpoint: remoteEndpoint,
             state: state,
             port: port,
+            direction: direction,
             dockerContainers: containers
         )
     }
@@ -130,21 +170,37 @@ struct PortEntry {
 final class PortScanner {
     private let dockerMetadataProvider = DockerMetadataProvider()
 
-    func scan() -> [PortGroup] {
+    func scan() -> [PortSection] {
         let output = runLsof()
         let dockerContainersByPort = dockerMetadataProvider.containersByPublishedPort()
-        let entries = output
+        let parsedEntries = output
             .split(separator: "\n")
             .dropFirst()
             .compactMap(parseLine)
+
+        let listeningPorts = Set(
+            parsedEntries
+                .filter { $0.protocolName == "TCP" && $0.state == "LISTEN" }
+                .map(\.port)
+        )
+
+        let entries = parsedEntries
+            .filter { entry in
+                !(entry.protocolName == "TCP" && entry.state != "LISTEN" && listeningPorts.contains(entry.port))
+            }
             .map { entry in
                 entry.enriched(with: dockerContainersByPort[entry.port] ?? [])
             }
 
-        let grouped = Dictionary(grouping: entries, by: \.port)
-        return grouped
-            .map { PortGroup(port: $0.key, entries: $0.value.sorted(by: sortEntries)) }
-            .sorted { $0.port < $1.port }
+        return PortDirection.allCases.map { direction in
+            let directionEntries = entries.filter { $0.direction == direction }
+            let grouped = Dictionary(grouping: directionEntries, by: \.port)
+            let groups = grouped
+                .map { PortGroup(direction: direction, port: $0.key, entries: $0.value.sorted(by: sortEntries)) }
+                .sorted { $0.port < $1.port }
+
+            return PortSection(direction: direction, groups: groups)
+        }
     }
 
     func debugRawLsofOutput() -> String {
@@ -156,7 +212,7 @@ final class PortScanner {
         let pipe = Pipe()
 
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        process.arguments = ["-nP", "-iTCP", "-sTCP:LISTEN", "-iUDP"]
+        process.arguments = ["-nP", "-iTCP", "-iUDP"]
         process.standardOutput = pipe
         process.standardError = Pipe()
 
@@ -191,6 +247,9 @@ final class PortScanner {
         let remoteEndpoint = endpoints.count > 1 ? endpoints[1].trimmingCharacters(in: CharacterSet.whitespaces) : nil
 
         guard let port = extractPort(from: localEndpoint) else { return nil }
+        guard let direction = classify(protocolName: protocolName, state: state, remoteEndpoint: remoteEndpoint) else {
+            return nil
+        }
 
         return PortEntry(
             command: command,
@@ -203,8 +262,25 @@ final class PortScanner {
             remoteEndpoint: remoteEndpoint,
             state: state,
             port: port,
+            direction: direction,
             dockerContainers: []
         )
+    }
+
+    private func classify(protocolName: String, state: String?, remoteEndpoint: String?) -> PortDirection? {
+        if protocolName == "TCP", state == "LISTEN" {
+            return .inbound
+        }
+
+        if protocolName == "UDP", remoteEndpoint == nil {
+            return .inbound
+        }
+
+        if remoteEndpoint != nil {
+            return .outbound
+        }
+
+        return nil
     }
 
     private func extractState(from text: String) -> String? {
