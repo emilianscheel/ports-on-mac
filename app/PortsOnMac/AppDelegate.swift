@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import Sparkle
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -7,9 +8,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
     private var showOutboundPorts = false
+    private let updateUserDriver = UpdateUserDriver(hostBundle: .main)
+    private var updater: SPUUpdater?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        if Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") is String {
+            let updater = SPUUpdater(
+                hostBundle: .main,
+                applicationBundle: .main,
+                userDriver: updateUserDriver,
+                delegate: nil
+            )
+            do {
+                try updater.start()
+                self.updater = updater
+            } catch {
+                NSLog("Ports on Mac could not start the updater: \(error.localizedDescription)")
+            }
+        }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
@@ -66,6 +84,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshItem.target = self
         refreshItem.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
         menu.addItem(refreshItem)
+
+        let updateItem = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        updateItem.target = self
+        updateItem.image = NSImage(
+            systemSymbolName: "arrow.trianglehead.2.clockwise.rotate.90",
+            accessibilityDescription: "Check for Updates"
+        )
+        updateItem.isEnabled = updater?.canCheckForUpdates ?? true
+        menu.addItem(updateItem)
 
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
@@ -139,6 +170,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func refresh() {
         rebuildMenu()
+    }
+
+    @objc private func checkForUpdates(_ sender: Any?) {
+        if let updater {
+            NSApp.activate(ignoringOtherApps: true)
+            updater.checkForUpdates()
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Updates aren’t available in this build"
+        alert.informativeText = "Automatic updates are included in signed releases from GitHub. This development build won’t check for or install updates."
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     @objc private func toggleOutboundPorts() {

@@ -1,4 +1,7 @@
 build/
 DerivedData/
+.build/
+dist/
+Packaging/SparkleTools/.build/
 *.xcuserstate
 xcuserdata/
