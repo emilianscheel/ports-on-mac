@@ -154,13 +154,13 @@ fi
 
 print "Installing without resetting TCC permissions or Ports on Mac preferences…"
 pkill -TERM -x "$APP_NAME" 2>/dev/null || true
-pkill -TERM -x PortsOnMacForwarder 2>/dev/null || true
+pkill -TERM -f '/PortsOnMacForwarder$' 2>/dev/null || true
 for _ in {1..30}; do pgrep -x "$APP_NAME" >/dev/null || break; sleep 0.1; done
-for _ in {1..30}; do pgrep -x PortsOnMacForwarder >/dev/null || break; sleep 0.1; done
+for _ in {1..30}; do pgrep -f '/PortsOnMacForwarder$' >/dev/null || break; sleep 0.1; done
 mkdir -p "$INSTALL_DIR"
 rm -rf "$INSTALL_APP" "$INSTALL_DIR/${APP_NAME}.previous.app"
 mv "$STAGE_APP" "$INSTALL_APP"
-pkill -TERM -x PortsOnMacForwarder 2>/dev/null || true
+pkill -TERM -f '/PortsOnMacForwarder$' 2>/dev/null || true
 codesign --verify --deep --strict --verbose=2 "$INSTALL_APP"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/Support/lsregister"
 if [[ ! -x "$LSREGISTER" ]]; then

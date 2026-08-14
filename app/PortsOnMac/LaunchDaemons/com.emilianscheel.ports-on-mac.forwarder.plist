@@ -7,7 +7,9 @@
 	<key>BundleProgram</key>
 	<string>Contents/MacOS/PortsOnMacForwarder</string>
 	<key>AssociatedBundleIdentifiers</key>
-	<string>com.emilianscheel.ports-on-mac</string>
+	<array>
+		<string>com.emilianscheel.ports-on-mac</string>
+	</array>
 	<key>MachServices</key>
 	<dict>
 		<key>com.emilianscheel.ports-on-mac.forwarder</key>

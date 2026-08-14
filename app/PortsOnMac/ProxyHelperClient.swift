@@ -10,11 +10,11 @@ enum ProxyHelperError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .requiresApproval:
-            return "Enable the Ports on Mac helper in System Settings → General → Login Items & Extensions so local domains can use port 80 and HTTPS on port 443."
+            return "Allow Ports on Mac in System Settings → General → Login Items & Extensions → Allow in the Background so local domains can use port 80 and HTTPS on port 443."
         case .notEnabled:
             return "The Ports on Mac helper is not enabled."
         case .unreachable:
-            return "The Ports on Mac helper is installed but isn’t responding. If it appears in Login Items, toggle it off and on, or reinstall the app."
+            return "The Ports on Mac helper is installed but isn’t responding. If it appears under Allow in the Background in Login Items, toggle it off and on, or reinstall the app."
         case .remote(let message):
             return message
         }
@@ -54,13 +54,13 @@ final class ProxyHelperClient: @unchecked Sendable {
     }
 
     func syncLiveDomains(_ domains: [String], enableHTTPS: Bool) async throws {
-        try await performHelperCall {
+        try await performHelperCall(allowRepair: enableHTTPS) {
             try await self.setLiveDomains(domains, enableHTTPS: enableHTTPS)
         }
     }
 
     func installTrustedRoot(_ certificateDER: Data) async throws {
-        try await performHelperCall {
+        try await performHelperCall(allowRepair: true) {
             try await self.installTrustedRootOnce(certificateDER)
         }
     }
@@ -76,7 +76,7 @@ final class ProxyHelperClient: @unchecked Sendable {
         _ = semaphore.wait(timeout: .now() + 2)
     }
 
-    private func performHelperCall(_ work: @escaping () async throws -> Void) async throws {
+    private func performHelperCall(allowRepair: Bool, _ work: @escaping () async throws -> Void) async throws {
         var repaired = false
         var lastError: Error = ProxyHelperError.unreachable
 
@@ -95,10 +95,10 @@ final class ProxyHelperClient: @unchecked Sendable {
                 lastError = Self.mappedXPCError(error)
             }
 
-            if !repaired, daemon.status == .enabled {
+            if allowRepair, !repaired, daemon.status == .enabled {
                 repaired = true
                 do {
-                    try repairHelper()
+                    try await repairHelper()
                 } catch let error as ProxyHelperError {
                     switch error {
                     case .requiresApproval, .notEnabled:
@@ -107,9 +107,10 @@ final class ProxyHelperClient: @unchecked Sendable {
                         break
                     }
                 } catch {
+                    NSLog("Ports on Mac helper repair failed: \(error.localizedDescription)")
                     lastError = error
                 }
-                try await Task.sleep(for: .seconds(1))
+                try await Task.sleep(for: .seconds(1.5))
                 continue
             }
 
@@ -119,8 +120,35 @@ final class ProxyHelperClient: @unchecked Sendable {
         throw lastError
     }
 
-    private func repairHelper() throws {
-        try daemon.register()
+    private func repairHelper() async throws {
+        NSLog("Ports on Mac repairing helper (\(Self.statusName(daemon.status)))")
+        if daemon.status == .enabled {
+            do {
+                try await daemon.unregister()
+            } catch {
+                NSLog("Ports on Mac helper unregister failed: \(error.localizedDescription)")
+            }
+            for _ in 0..<30 {
+                if daemon.status != .enabled { break }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+        }
+
+        switch daemon.status {
+        case .enabled:
+            do {
+                try daemon.register()
+            } catch {
+                NSLog("Ports on Mac helper register while enabled: \(error.localizedDescription)")
+            }
+        case .notRegistered, .notFound:
+            try daemon.register()
+        case .requiresApproval:
+            throw ProxyHelperError.requiresApproval
+        default:
+            throw ProxyHelperError.notEnabled
+        }
+
         switch daemon.status {
         case .enabled:
             return
@@ -132,8 +160,32 @@ final class ProxyHelperClient: @unchecked Sendable {
     }
 
     private func setLiveDomains(_ domains: [String], enableHTTPS: Bool) async throws {
-        try await withHelper { helper, resumeOnce, connection in
-            let reply: (Bool, String?) -> Void = { ok, message in
+        if enableHTTPS {
+            try await withHelper(interface: NSXPCInterface(with: ProxyHelperXPCProtocol.self)) { proxy, resumeOnce, connection in
+                guard let helper = proxy as? ProxyHelperXPCProtocol else {
+                    resumeOnce.resume(throwing: ProxyHelperError.unreachable)
+                    connection.invalidate()
+                    return
+                }
+                helper.setLiveDomains(domains, enableHTTPS: true) { ok, message in
+                    if ok {
+                        resumeOnce.resume()
+                    } else {
+                        resumeOnce.resume(throwing: ProxyHelperError.remote(message ?? "The helper could not update local domains."))
+                    }
+                    connection.invalidate()
+                }
+            }
+            return
+        }
+
+        try await withHelper(interface: NSXPCInterface(with: ProxyHelperHTTPXPCProtocol.self)) { proxy, resumeOnce, connection in
+            guard let helper = proxy as? ProxyHelperHTTPXPCProtocol else {
+                resumeOnce.resume(throwing: ProxyHelperError.unreachable)
+                connection.invalidate()
+                return
+            }
+            helper.setLiveDomains(domains) { ok, message in
                 if ok {
                     resumeOnce.resume()
                 } else {
@@ -141,17 +193,16 @@ final class ProxyHelperClient: @unchecked Sendable {
                 }
                 connection.invalidate()
             }
-
-            if enableHTTPS {
-                helper.setLiveDomains(domains, enableHTTPS: true, withReply: reply)
-            } else {
-                helper.setLiveDomains(domains, withReply: reply)
-            }
         }
     }
 
     private func installTrustedRootOnce(_ certificateDER: Data) async throws {
-        try await withHelper { helper, resumeOnce, connection in
+        try await withHelper(interface: NSXPCInterface(with: ProxyHelperXPCProtocol.self)) { proxy, resumeOnce, connection in
+            guard let helper = proxy as? ProxyHelperXPCProtocol else {
+                resumeOnce.resume(throwing: ProxyHelperError.unreachable)
+                connection.invalidate()
+                return
+            }
             helper.installTrustedRoot(certificateDER) { ok, message in
                 if ok {
                     resumeOnce.resume()
@@ -164,16 +215,15 @@ final class ProxyHelperClient: @unchecked Sendable {
     }
 
     private func withHelper(
-        _ body: @escaping (ProxyHelperXPCProtocol, ResumeOnce, NSXPCConnection) -> Void
+        interface: NSXPCInterface,
+        _ body: @escaping (Any, ResumeOnce, NSXPCConnection) -> Void
     ) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let connection = NSXPCConnection(
                 machServiceName: ProxyConstants.machServiceName,
                 options: .privileged
             )
-            connection.remoteObjectInterface = NSXPCInterface(with: ProxyHelperXPCProtocol.self)
-            connection.resume()
-
+            connection.remoteObjectInterface = interface
             let resumeOnce = ResumeOnce(continuation)
             connection.invalidationHandler = {
                 resumeOnce.resume(throwing: ProxyHelperError.unreachable)
@@ -181,19 +231,15 @@ final class ProxyHelperClient: @unchecked Sendable {
             connection.interruptionHandler = {
                 resumeOnce.resume(throwing: ProxyHelperError.unreachable)
             }
+            connection.resume()
 
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                NSLog("Ports on Mac helper XPC error: \(error.localizedDescription)")
                 resumeOnce.resume(throwing: Self.mappedXPCError(error))
                 connection.invalidate()
             }
 
-            guard let helper = proxy as? ProxyHelperXPCProtocol else {
-                resumeOnce.resume(throwing: ProxyHelperError.unreachable)
-                connection.invalidate()
-                return
-            }
-
-            body(helper, resumeOnce, connection)
+            body(proxy, resumeOnce, connection)
         }
     }
 
@@ -202,6 +248,21 @@ final class ProxyHelperClient: @unchecked Sendable {
             return error
         }
         return ProxyHelperError.unreachable
+    }
+
+    private static func statusName(_ status: SMAppService.Status) -> String {
+        switch status {
+        case .enabled:
+            return "enabled"
+        case .requiresApproval:
+            return "requiresApproval"
+        case .notRegistered:
+            return "notRegistered"
+        case .notFound:
+            return "notFound"
+        @unknown default:
+            return "unknown"
+        }
     }
 }
 

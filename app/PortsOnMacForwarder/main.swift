@@ -24,10 +24,7 @@ private final class ForwarderListenerDelegate: NSObject, NSXPCListenerDelegate {
 private enum ForwarderSecurity {
     static func isTrustedCaller(_ connection: NSXPCConnection) -> Bool {
         let pid = connection.processIdentifier
-        let attributes = [kSecGuestAttributePid: pid] as CFDictionary
-
-        var secCode: SecCode?
-        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &secCode) == errSecSuccess, let secCode else {
+        guard let secCode = copyCode(for: connection) else {
             NSLog("PortsOnMacForwarder rejected caller pid \(pid): could not copy code")
             return false
         }
@@ -63,6 +60,17 @@ private enum ForwarderSecurity {
 
         NSLog("PortsOnMacForwarder rejected caller pid \(pid) identifier=nil")
         return false
+    }
+
+    static func copyCode(for connection: NSXPCConnection) -> SecCode? {
+        let pid = connection.processIdentifier
+        guard pid > 0 else { return nil }
+        let pidAttributes = [kSecGuestAttributePid: pid] as CFDictionary
+        var secCode: SecCode?
+        guard SecCodeCopyGuestWithAttributes(nil, pidAttributes, [], &secCode) == errSecSuccess else {
+            return nil
+        }
+        return secCode
     }
 }
 
