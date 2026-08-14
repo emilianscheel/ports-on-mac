@@ -52,8 +52,9 @@ final class FaviconStore: @unchecked Sendable {
     }
 
     private func fetchFirstImage(from origins: [URL], keys: [String]) {
-        func finish(_ image: NSImage?) {
-            queue.async {
+        tryOrigins(origins) { data, mime in
+            self.queue.async {
+                let image = data.flatMap { Self.image(from: $0, mimeType: mime) }
                 for key in keys {
                     self.inflight.remove(key)
                     if let image {
@@ -65,55 +66,56 @@ final class FaviconStore: @unchecked Sendable {
                 }
             }
         }
-
-        tryOrigins(origins) { image in
-            finish(image)
-        }
     }
 
-    private func tryOrigins(_ origins: [URL], completion: @escaping (NSImage?) -> Void) {
+    private func tryOrigins(_ origins: [URL], completion: @escaping @Sendable (Data?, String?) -> Void) {
         guard let origin = origins.first else {
-            completion(nil)
+            completion(nil, nil)
             return
         }
 
-        fetchImage(from: origin) { [weak self] image in
-            if let image {
-                completion(image)
+        fetchImage(from: origin) { [weak self] data, mime in
+            if let data {
+                completion(data, mime)
                 return
             }
             self?.tryOrigins(Array(origins.dropFirst()), completion: completion)
         }
     }
 
-    private func fetchImage(from origin: URL, completion: @escaping (NSImage?) -> Void) {
+    private func fetchImage(from origin: URL, completion: @escaping @Sendable (Data?, String?) -> Void) {
         let faviconURL = origin.appendingPathComponent("favicon.ico")
         fetchData(from: faviconURL) { [weak self] data, mime in
-            if let data, let image = Self.image(from: data, mimeType: mime) {
-                completion(image)
+            if let data, Self.image(from: data, mimeType: mime) != nil {
+                completion(data, mime)
                 return
             }
 
-            self?.fetchData(from: origin) { data, mime in
+            guard let self else {
+                completion(nil, nil)
+                return
+            }
+
+            self.fetchData(from: origin) { data, mime in
                 guard let data, Self.looksLikeHTML(data, mimeType: mime),
                       let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1),
                       let href = Self.iconHREF(from: html, base: origin) else {
-                    completion(nil)
+                    completion(nil, nil)
                     return
                 }
 
-                self?.fetchData(from: href) { iconData, iconMime in
-                    guard let iconData else {
-                        completion(nil)
+                self.fetchData(from: href) { iconData, iconMime in
+                    guard let iconData, Self.image(from: iconData, mimeType: iconMime) != nil else {
+                        completion(nil, nil)
                         return
                     }
-                    completion(Self.image(from: iconData, mimeType: iconMime))
+                    completion(iconData, iconMime)
                 }
             }
         }
     }
 
-    private func fetchData(from url: URL, completion: @escaping (Data?, String?) -> Void) {
+    private func fetchData(from url: URL, completion: @escaping @Sendable (Data?, String?) -> Void) {
         var request = URLRequest(url: url)
         request.setValue("image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
         session.dataTask(with: request) { data, response, _ in

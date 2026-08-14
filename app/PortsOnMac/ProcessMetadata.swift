@@ -6,7 +6,7 @@ enum ProcessMetadata {
         var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
         let result = proc_pidpath(pid, &buffer, UInt32(buffer.count))
         guard result > 0 else { return nil }
-        return String(cString: buffer)
+        return string(fromNullTerminated: buffer)
     }
 
     static func currentWorkingDirectory(pid: pid_t) -> String? {
@@ -14,8 +14,12 @@ enum ProcessMetadata {
         guard ports_on_mac_pid_cwd(pid, &buffer, Int32(buffer.count)) == 0 else {
             return nil
         }
-        let path = String(cString: buffer)
+        let path = string(fromNullTerminated: buffer)
         return path.isEmpty ? nil : path
+    }
+
+    private static func string(fromNullTerminated buffer: [CChar]) -> String {
+        String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
     static func bundleURL(containingExecutable path: String) -> URL? {

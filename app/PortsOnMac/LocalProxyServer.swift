@@ -141,8 +141,10 @@ final class LocalProxyServer: @unchecked Sendable {
                     bindState.group.leave()
                 }
                 NSLog("Ports on Mac proxy failed on \(port): \(error.localizedDescription)")
-                self?.queue.async {
-                    self?.stopLocked()
+                if let self {
+                    self.queue.async {
+                        self.stopLocked()
+                    }
                 }
             default:
                 break
@@ -238,6 +240,7 @@ final class LocalProxyServer: @unchecked Sendable {
         backend.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
+                guard let self else { return }
                 let rewritten = Self.rewrittenHeaders(headerBlock, host: host, proto: proto)
                 backend.send(content: rewritten + leftover, completion: .contentProcessed { error in
                     if let error {
@@ -246,8 +249,8 @@ final class LocalProxyServer: @unchecked Sendable {
                         backend.cancel()
                         return
                     }
-                    self?.splice(client, backend)
-                    self?.splice(backend, client)
+                    self.splice(client, backend)
+                    self.splice(backend, client)
                 })
             case .failed(let error):
                 NSLog("Ports on Mac backend connect failed: \(error.localizedDescription)")
@@ -265,7 +268,8 @@ final class LocalProxyServer: @unchecked Sendable {
 
     private func splice(_ from: NWConnection, _ to: NWConnection) {
         from.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
-            if let error {
+            guard let self else { return }
+            if error != nil {
                 to.cancel()
                 from.cancel()
                 return
@@ -278,7 +282,7 @@ final class LocalProxyServer: @unchecked Sendable {
                         to.cancel()
                         return
                     }
-                    self?.splice(from, to)
+                    self.splice(from, to)
                 })
                 return
             }
@@ -291,7 +295,7 @@ final class LocalProxyServer: @unchecked Sendable {
                 return
             }
 
-            self?.splice(from, to)
+            self.splice(from, to)
         }
     }
 

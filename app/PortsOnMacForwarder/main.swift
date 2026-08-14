@@ -332,6 +332,7 @@ private final class PortForwarder: @unchecked Sendable {
 
     private func splice(_ from: NWConnection, _ to: NWConnection) {
         from.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
             if error != nil {
                 from.cancel()
                 to.cancel()
@@ -345,7 +346,7 @@ private final class PortForwarder: @unchecked Sendable {
                         to.cancel()
                         return
                     }
-                    self?.splice(from, to)
+                    self.splice(from, to)
                 })
                 return
             }
@@ -358,7 +359,7 @@ private final class PortForwarder: @unchecked Sendable {
                 return
             }
 
-            self?.splice(from, to)
+            self.splice(from, to)
         }
     }
 }
