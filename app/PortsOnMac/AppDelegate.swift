@@ -545,19 +545,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func activateLicenseKey() {
         NSApp.activate(ignoringOtherApps: true)
 
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 21))
-        field.placeholderString = "PORTS-…"
-        field.stringValue = ""
-        field.isBezeled = true
-        field.bezelStyle = .roundedBezel
-        field.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = "Activate License Key"
         alert.informativeText = "Paste the key Polar emailed after your purchase. One key works on up to 3 Macs."
         alert.addButton(withTitle: "Activate")
         alert.addButton(withTitle: "Cancel")
+        alert.layout()
+
+        let fieldWidth = max(220, alert.window.frame.width - 48)
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: fieldWidth, height: 21))
+        field.placeholderString = "PORTS-…"
+        field.stringValue = ""
+        field.isBezeled = true
+        field.bezelStyle = .roundedBezel
+        field.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
 
