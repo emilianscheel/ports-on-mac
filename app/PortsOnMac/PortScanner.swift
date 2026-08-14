@@ -1,6 +1,6 @@
 import Foundation
 
-enum PortDirection: CaseIterable {
+enum PortDirection: CaseIterable, Sendable {
     case inbound
     case outbound
 
@@ -23,12 +23,12 @@ enum PortDirection: CaseIterable {
     }
 }
 
-struct PortSection {
+struct PortSection: Sendable {
     let direction: PortDirection
     let groups: [PortGroup]
 }
 
-struct PortGroup {
+struct PortGroup: Sendable {
     let direction: PortDirection
     let port: Int
     let entries: [PortEntry]
@@ -64,7 +64,7 @@ struct PortGroup {
     }
 }
 
-struct DockerContainer {
+struct DockerContainer: Sendable {
     let id: String
     let name: String
 
@@ -73,7 +73,7 @@ struct DockerContainer {
     }
 }
 
-struct PortEntry {
+struct PortEntry: Sendable {
     let command: String
     let pid: Int32
     let user: String
@@ -237,12 +237,12 @@ struct PortEntry {
     }
 
     func withProcessMetadata() -> PortEntry {
-        let executablePath = ProcessMetadata.executablePath(pid: pid)
+        let metadata = ProcessMetadata.cached(for: pid)
         return copy(
             dockerContainers: dockerContainers,
-            executablePath: executablePath,
-            bundleIdentifier: ProcessMetadata.bundleIdentifier(executablePath: executablePath),
-            currentWorkingDirectory: ProcessMetadata.currentWorkingDirectory(pid: pid)
+            executablePath: metadata.executablePath,
+            bundleIdentifier: metadata.bundleIdentifier,
+            currentWorkingDirectory: metadata.currentWorkingDirectory
         )
     }
 
@@ -301,12 +301,29 @@ struct PortEntry {
     }
 }
 
-final class PortScanner {
+final class PortScanner: @unchecked Sendable {
     private let dockerMetadataProvider = DockerMetadataProvider()
 
     func scan() -> [PortSection] {
-        let output = runLsof()
-        let dockerContainersByPort = dockerMetadataProvider.containersByPublishedPort()
+        let outputBox = ScanBox("")
+        let dockerBox = ScanBox<[Int: [DockerContainer]]>([:])
+        let group = DispatchGroup()
+
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            outputBox.value = self.runLsof()
+            group.leave()
+        }
+
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            dockerBox.value = self.dockerMetadataProvider.containersByPublishedPort()
+            group.leave()
+        }
+
+        group.wait()
+        let output = outputBox.value
+        let dockerContainersByPort = dockerBox.value
         let parsedEntries = output
             .split(separator: "\n")
             .dropFirst()
@@ -327,6 +344,8 @@ final class PortScanner {
                     .withProcessMetadata()
                     .enriched(with: dockerContainersByPort[entry.port] ?? [])
             }
+
+        ProcessMetadata.retainPids(Set(entries.map(\.pid)))
 
         return PortDirection.allCases.map { direction in
             let directionEntries = entries.filter { $0.direction == direction }
@@ -452,8 +471,19 @@ final class PortScanner {
     }
 }
 
-private final class DockerMetadataProvider {
+private final class ScanBox<Value>: @unchecked Sendable {
+    var value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+}
+
+private final class DockerMetadataProvider: @unchecked Sendable {
+    private static let queryTimeout: TimeInterval = 0.3
+
     func containersByPublishedPort() -> [Int: [DockerContainer]] {
+        guard dockerSocketExists() else { return [:] }
         guard let output = runDockerPS(), !output.isEmpty else { return [:] }
 
         var containersByPort: [Int: [DockerContainer]] = [:]
@@ -479,11 +509,14 @@ private final class DockerMetadataProvider {
 
         let process = Process()
         let output = Pipe()
+        let finished = DispatchGroup()
 
         process.executableURL = URL(fileURLWithPath: dockerPath)
         process.arguments = ["ps", "--format", "{{.ID}}\t{{.Names}}\t{{.Ports}}"]
         process.standardOutput = output
         process.standardError = Pipe()
+        finished.enter()
+        process.terminationHandler = { _ in finished.leave() }
 
         do {
             try process.run()
@@ -491,11 +524,25 @@ private final class DockerMetadataProvider {
             return nil
         }
 
-        process.waitUntilExit()
+        if finished.wait(timeout: .now() + Self.queryTimeout) == .timedOut {
+            process.terminate()
+            _ = finished.wait(timeout: .now() + 0.1)
+            return nil
+        }
+
         guard process.terminationStatus == 0 else { return nil }
 
         let data = output.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8)
+    }
+
+    private func dockerSocketExists() -> Bool {
+        let sockets = [
+            "/var/run/docker.sock",
+            FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".docker/run/docker.sock").path
+        ]
+        return sockets.contains { FileManager.default.fileExists(atPath: $0) }
     }
 
     private func dockerExecutablePath() -> String? {

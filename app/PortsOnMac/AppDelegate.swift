@@ -5,7 +5,6 @@ import Sparkle
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private let scanner = PortScanner()
     private let bindings = ServiceBindingStore.shared
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
@@ -16,6 +15,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastSyncedDomains: [String] = []
     private var lastSyncedHTTPS = false
     private var hasSyncedLiveDomains = false
+    private var lastSections: [PortSection] = []
+    private var lastSnapshot = MenuSnapshot.empty
+    private var lastMenuFingerprint = ""
+    private var isMenuOpen = false
+    private var isScanning = false
+    private var queuedRefresh = false
+    private var refreshWaiters: [CheckedContinuation<MenuSnapshot, Never>] = []
+    private var scanLoopTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -45,26 +52,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
         LicenseStore.shared.ensureTrialStarted()
-        rebuildMenu()
+        rebuildMenu(from: lastSnapshot)
+        startScanLoop()
         Task {
             await LicenseStore.shared.refreshValidation()
-            rebuildMenu()
+            rebuildMenu(from: lastSnapshot)
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        scanLoopTask?.cancel()
         try? LocalProxyServer.shared.updateRoutes([:], httpsDomains: [])
         ProxyHelperClient.shared.clearLiveDomainsBlocking()
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        rebuildMenu()
+        isMenuOpen = true
+        scheduleRefresh()
     }
 
-    private func rebuildMenu() {
-        menu.removeAllItems()
+    func menuDidClose(_ menu: NSMenu) {
+        isMenuOpen = false
+    }
 
-        let snapshot = makeSnapshot()
+    private func startScanLoop() {
+        scanLoopTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.refreshSnapshot()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
+    private func scheduleRefresh() {
+        Task { [weak self] in
+            await self?.refreshSnapshot()
+        }
+    }
+
+    @discardableResult
+    private func refreshSnapshot() async -> MenuSnapshot {
+        if isScanning {
+            queuedRefresh = true
+            return await withCheckedContinuation { continuation in
+                refreshWaiters.append(continuation)
+            }
+        }
+
+        isScanning = true
+        var snapshot = lastSnapshot
+        repeat {
+            queuedRefresh = false
+            let sections = await Task.detached(priority: .userInitiated) {
+                PortScanner().scan()
+            }.value
+            lastSections = sections
+            snapshot = makeSnapshot(from: sections)
+            rebuildMenu(from: snapshot)
+        } while queuedRefresh
+
+        isScanning = false
+        let waiters = refreshWaiters
+        refreshWaiters = []
+        for waiter in waiters {
+            waiter.resume(returning: snapshot)
+        }
+        return snapshot
+    }
+
+    private func rebuildMenu(from snapshot: MenuSnapshot) {
+        lastSnapshot = snapshot
+        let fingerprint = snapshot.fingerprint(
+            showOutbound: showOutboundPorts,
+            needsLicense: LicenseStore.shared.needsLicenseMenu
+        )
+        if isMenuOpen, fingerprint == lastMenuFingerprint {
+            syncProxy(with: snapshot)
+            return
+        }
+
+        lastMenuFingerprint = fingerprint
+        menu.removeAllItems()
         syncProxy(with: snapshot)
 
         addStatusHeader(inboundCount: snapshot.inboundCount, outboundCount: snapshot.outboundCount)
@@ -145,8 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(quitItem)
     }
 
-    private func makeSnapshot() -> MenuSnapshot {
-        let sections = scanner.scan()
+    private func makeSnapshot(from sections: [PortSection]) -> MenuSnapshot {
         let inbound = sections.first { $0.direction == .inbound } ?? PortSection(direction: .inbound, groups: [])
         let outbound = sections.first { $0.direction == .outbound } ?? PortSection(direction: .outbound, groups: [])
 
@@ -443,7 +511,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func refresh() {
-        rebuildMenu()
+        scheduleRefresh()
     }
 
     @objc private func showAbout() {
@@ -497,7 +565,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task { @MainActor in
             do {
                 try await LicenseStore.shared.activate(key: field.stringValue)
-                rebuildMenu()
+                rebuildMenu(from: lastSnapshot)
             } catch {
                 presentError(error, title: "Couldn’t activate license")
             }
@@ -506,7 +574,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleOutboundPorts() {
         showOutboundPorts.toggle()
-        rebuildMenu()
+        lastMenuFingerprint = ""
+        rebuildMenu(from: lastSnapshot)
     }
 
     @objc private func openPort(_ sender: NSMenuItem) {
@@ -565,7 +634,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 lastSyncedHTTPS = false
                 let httpsWarning: String?
                 do {
-                    httpsWarning = try await applyProxy(snapshot: makeSnapshot(), forceHelper: true)
+                    let snapshot = await refreshSnapshot()
+                    httpsWarning = try await applyProxy(snapshot: snapshot, forceHelper: true)
                 } catch {
                     try? bindings.unassign(domain: domain)
                     lastSyncedDomains = []
@@ -573,7 +643,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     throw error
                 }
                 LastDomainStore.shared.remember(domain, for: context.entry)
-                rebuildMenu()
+                rebuildMenu(from: makeSnapshot(from: lastSections))
                 if let httpsWarning {
                     presentNotice(httpsWarning, title: "Assigned without HTTPS")
                 }
@@ -581,7 +651,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 showHelperApprovalAlert()
             } catch {
                 presentError(error, title: "Couldn’t assign domain")
-                rebuildMenu()
+                rebuildMenu(from: makeSnapshot(from: lastSections))
             }
         }
     }
@@ -599,14 +669,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 lastSyncedHTTPS = false
                 let httpsWarning: String?
                 do {
-                    httpsWarning = try await applyProxy(snapshot: makeSnapshot(), forceHelper: true)
+                    let snapshot = await refreshSnapshot()
+                    httpsWarning = try await applyProxy(snapshot: snapshot, forceHelper: true)
                 } catch {
                     try? bindings.setUsesHTTPS(!enable, domain: domain)
                     lastSyncedDomains = []
                     lastSyncedHTTPS = false
                     throw error
                 }
-                rebuildMenu()
+                rebuildMenu(from: makeSnapshot(from: lastSections))
                 if let httpsWarning {
                     presentNotice(httpsWarning, title: enable ? "Couldn’t enable HTTPS" : "Couldn’t disable HTTPS")
                 }
@@ -614,7 +685,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 showHelperApprovalAlert()
             } catch {
                 presentError(error, title: enable ? "Couldn’t enable HTTPS" : "Couldn’t disable HTTPS")
-                rebuildMenu()
+                rebuildMenu(from: makeSnapshot(from: lastSections))
             }
         }
     }
@@ -630,7 +701,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             lastSyncedDomains = []
             lastSyncedHTTPS = false
-            rebuildMenu()
+            lastMenuFingerprint = ""
+            rebuildMenu(from: makeSnapshot(from: lastSections))
         } catch {
             presentError(error, title: "Couldn’t unassign domain")
         }
@@ -645,7 +717,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            self?.rebuildMenu()
+            ProcessMetadata.invalidate(pid: pid)
+            self?.scheduleRefresh()
         }
     }
 
@@ -682,11 +755,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 private struct MenuSnapshot {
+    static let empty = MenuSnapshot(
+        inboundCount: 0,
+        outboundCount: 0,
+        services: [],
+        inbound: PortSection(direction: .inbound, groups: []),
+        outbound: PortSection(direction: .outbound, groups: [])
+    )
+
     let inboundCount: Int
     let outboundCount: Int
     let services: [(entry: PortEntry, binding: ServiceBinding)]
     let inbound: PortSection
     let outbound: PortSection
+
+    func fingerprint(showOutbound: Bool, needsLicense: Bool) -> String {
+        var parts = [
+            "\(inboundCount)",
+            "\(outboundCount)",
+            showOutbound ? "out" : "in",
+            needsLicense ? "lic" : "ok"
+        ]
+        parts.append(contentsOf: services.map { service in
+            "\(service.binding.domain)#\(service.binding.usesHTTPS)#\(service.entry.processIdentity)#\(service.entry.port)"
+        })
+        parts.append(contentsOf: inbound.groups.map(Self.groupFingerprint))
+        if showOutbound {
+            parts.append(contentsOf: outbound.groups.map(Self.groupFingerprint))
+        }
+        return parts.joined(separator: "|")
+    }
+
+    private static func groupFingerprint(_ group: PortGroup) -> String {
+        let entries = group.entries.map { entry in
+            let docker = entry.dockerContainers.map(\.id).joined(separator: ",")
+            return "\(entry.processIdentity)#\(entry.localEndpoint)#\(entry.currentWorkingDirectory ?? "")#\(docker)"
+        }.joined(separator: ",")
+        return "\(group.port):\(group.title):\(group.subtitle ?? ""):\(entries)"
+    }
 }
 
 private final class PortMenuContext: NSObject {

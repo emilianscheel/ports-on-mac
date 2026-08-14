@@ -3,6 +3,9 @@ import AppKit
 enum ProcessIcon {
     static let menuSize = NSSize(width: 16, height: 16)
 
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var appIconCache: [String: NSImage] = [:]
+
     static func image(for entry: PortEntry, domain: String? = nil, usesHTTPS: Bool = false) -> NSImage {
         if let favicon = FaviconStore.shared.cachedImage(for: entry, domain: domain, usesHTTPS: usesHTTPS) {
             return scaled(favicon)
@@ -10,8 +13,8 @@ enum ProcessIcon {
 
         FaviconStore.shared.prefetch(for: entry, domain: domain, usesHTTPS: usesHTTPS)
 
-        if let icon = appIcon(for: entry) {
-            return scaled(icon)
+        if let icon = cachedAppIcon(for: entry) {
+            return icon
         }
 
         return scaled(terminalFallback)
@@ -47,6 +50,30 @@ enum ProcessIcon {
 
         return NSImage(size: menuSize)
     }()
+
+    private static func cachedAppIcon(for entry: PortEntry) -> NSImage? {
+        let key = appIconKey(for: entry)
+        lock.lock()
+        if let cached = appIconCache[key] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        guard let icon = appIcon(for: entry) else { return nil }
+        let scaledIcon = scaled(icon)
+        lock.lock()
+        appIconCache[key] = scaledIcon
+        lock.unlock()
+        return scaledIcon
+    }
+
+    private static func appIconKey(for entry: PortEntry) -> String {
+        if let executablePath = entry.executablePath, !executablePath.isEmpty {
+            return "path:\(executablePath)"
+        }
+        return "pid:\(entry.pid)"
+    }
 
     private static func appIcon(for entry: PortEntry) -> NSImage? {
         if let running = NSRunningApplication(processIdentifier: entry.pid),
