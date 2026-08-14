@@ -28,7 +28,7 @@ export default function Home() {
                             nativeButton={false}
                             variant="secondary"
                             render={<a href="#download" />}
-                            className="h-10 rounded-full bg-neutral-100 px-4 text-[15px] text-black hover:bg-neutral-200"
+                            className="h-10 rounded-full bg-neutral-100 px-4 text-[15px] text-black transition-colors duration-150 ease-out hover:bg-neutral-200"
                         >
                             Download
                         </Button>
@@ -36,7 +36,7 @@ export default function Home() {
                             nativeButton={false}
                             variant="ghost"
                             render={<a href={checkoutHref} />}
-                            className="h-10 rounded-full bg-transparent px-4 text-[15px] text-black hover:bg-neutral-100"
+                            className="h-10 rounded-full bg-transparent px-4 text-[15px] text-black transition-colors duration-150 ease-out hover:bg-neutral-100"
                         >
                             Buy
                         </Button>
