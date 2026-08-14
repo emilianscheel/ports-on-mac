@@ -154,19 +154,27 @@ fi
 
 print "Installing without resetting TCC permissions or Ports on Mac preferences…"
 pkill -TERM -x "$APP_NAME" 2>/dev/null || true
-pkill -TERM -f '/PortsOnMacForwarder$' 2>/dev/null || true
 for _ in {1..30}; do pgrep -x "$APP_NAME" >/dev/null || break; sleep 0.1; done
-for _ in {1..30}; do pgrep -f '/PortsOnMacForwarder$' >/dev/null || break; sleep 0.1; done
 mkdir -p "$INSTALL_DIR"
 rm -rf "$INSTALL_APP" "$INSTALL_DIR/${APP_NAME}.previous.app"
 mv "$STAGE_APP" "$INSTALL_APP"
-pkill -TERM -f '/PortsOnMacForwarder$' 2>/dev/null || true
 codesign --verify --deep --strict --verbose=2 "$INSTALL_APP"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/Support/lsregister"
 if [[ ! -x "$LSREGISTER" ]]; then
   LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 fi
 [[ ! -x "$LSREGISTER" ]] || "$LSREGISTER" -f "$INSTALL_APP" >/dev/null 2>&1 || true
+print "Replacing the privileged helper (administrator password may be required)…"
+HELPER_LABEL="system/com.emilianscheel.ports-on-mac.forwarder"
+if sudo -n launchctl kickstart -k "$HELPER_LABEL" 2>/dev/null; then
+  print "Helper restarted."
+elif osascript -e "do shell script \"launchctl kickstart -k $HELPER_LABEL\" with administrator privileges"; then
+  print "Helper restarted."
+elif "$INSTALL_APP/Contents/MacOS/$APP_NAME" --replace-helper; then
+  print "Helper replaced."
+else
+  print "Warning: the helper was not restarted. Enable HTTPS after launch and approve the administrator prompt."
+fi
 open -n "$INSTALL_APP"
 print "Installed and launched $INSTALL_APP"
 print "Permissions persist while the signing identity, bundle identifier, and install path remain unchanged."

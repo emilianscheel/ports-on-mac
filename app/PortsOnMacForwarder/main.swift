@@ -118,6 +118,10 @@ private final class ForwarderService: NSObject, ProxyHelperXPCProtocol, @uncheck
             reply(false, error.localizedDescription)
         }
     }
+
+    func helperVersion(withReply reply: @escaping (String) -> Void) {
+        reply(ProxyConstants.helperProtocolVersion)
+    }
 }
 
 private enum HostsFile {

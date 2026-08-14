@@ -213,6 +213,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if enableHTTPS {
             do {
                 try LocalCertificateAuthority.shared.prepareCA()
+                NSApp.activate(ignoringOtherApps: true)
+                try LocalCertificateAuthority.shared.installUserTrust()
                 try LocalProxyServer.shared.updateRoutes(routes, httpsDomains: httpsDomains)
             } catch {
                 NSLog("Ports on Mac local HTTPS setup failed: \(error.localizedDescription)")
@@ -221,7 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 try LocalProxyServer.shared.updateRoutes(routes, httpsDomains: [])
                 enableHTTPS = false
-                httpsWarning = "The domain still works over HTTP. HTTPS couldn’t be enabled (\(error.localizedDescription)). Choose Use HTTPS to try again."
+                httpsWarning = "The domain still works over HTTP. HTTPS couldn’t be enabled (\(error.localizedDescription)). Use Enable HTTPS to try again."
             }
         } else {
             try LocalProxyServer.shared.updateRoutes(routes, httpsDomains: [])
@@ -245,7 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if enableHTTPS {
             do {
-                try await ProxyHelperClient.shared.installTrustedRoot(try LocalCertificateAuthority.shared.certificateDER)
+                try await ProxyHelperClient.shared.ensureCurrentHelper()
                 try await ProxyHelperClient.shared.syncLiveDomains(domains, enableHTTPS: true)
             } catch let error as ProxyHelperError {
                 switch error {
@@ -293,7 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastSyncedDomains = domains
         lastSyncedHTTPS = false
         hasSyncedLiveDomains = true
-        return "The domain still works over HTTP. HTTPS couldn’t be enabled (\(reason)). Choose Use HTTPS to try again."
+        return "The domain still works over HTTP. HTTPS couldn’t be enabled (\(reason)). Use Enable HTTPS to try again."
     }
 
     private func addStatusHeader(inboundCount: Int, outboundCount: Int) {
@@ -351,7 +353,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         for group in section.groups {
             let item = NSMenuItem(title: group.title, action: nil, keyEquivalent: "")
-            item.subtitle = group.subtitle
             if let entry = group.entries.first {
                 item.image = ProcessIcon.image(for: entry)
             } else {

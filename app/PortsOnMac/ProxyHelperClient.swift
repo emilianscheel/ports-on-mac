@@ -10,11 +10,11 @@ enum ProxyHelperError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .requiresApproval:
-            return "Allow Ports on Mac in System Settings → General → Login Items & Extensions → Allow in the Background so local domains can use port 80 and HTTPS on port 443."
+            return "Allow Ports on Mac in System Settings → General → Login Items & Extensions → App Background Activity so local domains can use port 80 and HTTPS on port 443."
         case .notEnabled:
             return "The Ports on Mac helper is not enabled."
         case .unreachable:
-            return "The Ports on Mac helper is installed but isn’t responding. If it appears under Allow in the Background in Login Items, toggle it off and on, or reinstall the app."
+            return "The Ports on Mac helper is installed but isn’t responding. If it appears under App Background Activity, toggle it off and on, or reinstall the app."
         case .remote(let message):
             return message
         }
@@ -30,6 +30,23 @@ final class ProxyHelperClient: @unchecked Sendable {
 
     var status: SMAppService.Status {
         daemon.status
+    }
+
+    static func replaceHelperFromCommandLine() -> Int32 {
+        let semaphore = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var exitCode: Int32 = 1
+        Task.detached {
+            do {
+                try await ProxyHelperClient.shared.replaceHelperAndWait()
+                print("Replaced the Ports on Mac helper.")
+                exitCode = 0
+            } catch {
+                fputs("Could not replace the Ports on Mac helper: \(error.localizedDescription)\n", stderr)
+            }
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 45)
+        return exitCode
     }
 
     func prepareForAssignment() throws {
@@ -51,6 +68,13 @@ final class ProxyHelperClient: @unchecked Sendable {
         default:
             throw ProxyHelperError.notEnabled
         }
+    }
+
+    func ensureCurrentHelper() async throws {
+        if await helperSupportsCurrentProtocol() {
+            return
+        }
+        try await replaceHelperAndWait()
     }
 
     func syncLiveDomains(_ domains: [String], enableHTTPS: Bool) async throws {
@@ -76,6 +100,106 @@ final class ProxyHelperClient: @unchecked Sendable {
         _ = semaphore.wait(timeout: .now() + 2)
     }
 
+    func replaceHelperAndWait() async throws {
+        NSLog("Ports on Mac replacing helper (\(Self.statusName(daemon.status)))")
+        if await helperSupportsCurrentProtocol() {
+            NSLog("Ports on Mac helper is already current")
+            return
+        }
+
+        var restartedWithAdmin = false
+        if daemon.status == .enabled {
+            do {
+                try await daemon.unregister()
+                let deadline = Date().addingTimeInterval(10)
+                while daemon.status == .enabled, Date() < deadline {
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+            } catch {
+                NSLog("Ports on Mac helper unregister failed: \(error.localizedDescription)")
+                try kickstartHelperWithAdministrator()
+                restartedWithAdmin = true
+            }
+        }
+
+        if !restartedWithAdmin {
+            switch daemon.status {
+            case .enabled:
+                do {
+                    try daemon.register()
+                } catch {
+                    NSLog("Ports on Mac helper register while enabled: \(error.localizedDescription)")
+                }
+            case .notRegistered, .notFound:
+                try daemon.register()
+            case .requiresApproval:
+                throw ProxyHelperError.requiresApproval
+            default:
+                throw ProxyHelperError.notEnabled
+            }
+        }
+
+        if await waitForCurrentHelper(seconds: 10) {
+            return
+        }
+
+        if !restartedWithAdmin {
+            try kickstartHelperWithAdministrator()
+        }
+
+        if await waitForCurrentHelper(seconds: 20) {
+            return
+        }
+
+        throw ProxyHelperError.unreachable
+    }
+
+    private func waitForCurrentHelper(seconds: TimeInterval) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if await helperSupportsCurrentProtocol() {
+                NSLog("Ports on Mac helper is current")
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        return false
+    }
+
+    private func kickstartHelperWithAdministrator() throws {
+        let command = "launchctl kickstart -k system/\(ProxyConstants.machServiceName)"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = [
+            "-e",
+            "do shell script \"\(command)\" with administrator privileges"
+        ]
+        let stderr = Pipe()
+        process.standardError = stderr
+        process.standardOutput = Pipe()
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let message = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw ProxyHelperError.remote(
+                message?.isEmpty == false
+                    ? message!
+                    : "Could not restart the Ports on Mac helper. Enter your administrator password when asked."
+            )
+        }
+    }
+
+    private func helperSupportsCurrentProtocol() async -> Bool {
+        do {
+            let version = try await fetchHelperVersion()
+            return version == ProxyConstants.helperProtocolVersion
+        } catch {
+            return false
+        }
+    }
+
     private func performHelperCall(allowRepair: Bool, _ work: @escaping () async throws -> Void) async throws {
         var repaired = false
         var lastError: Error = ProxyHelperError.unreachable
@@ -98,19 +222,18 @@ final class ProxyHelperClient: @unchecked Sendable {
             if allowRepair, !repaired, daemon.status == .enabled {
                 repaired = true
                 do {
-                    try await repairHelper()
+                    try await replaceHelperAndWait()
                 } catch let error as ProxyHelperError {
                     switch error {
                     case .requiresApproval, .notEnabled:
                         throw error
                     default:
-                        break
+                        lastError = error
                     }
                 } catch {
                     NSLog("Ports on Mac helper repair failed: \(error.localizedDescription)")
                     lastError = error
                 }
-                try await Task.sleep(for: .seconds(1.5))
                 continue
             }
 
@@ -120,49 +243,10 @@ final class ProxyHelperClient: @unchecked Sendable {
         throw lastError
     }
 
-    private func repairHelper() async throws {
-        NSLog("Ports on Mac repairing helper (\(Self.statusName(daemon.status)))")
-        if daemon.status == .enabled {
-            do {
-                try await daemon.unregister()
-            } catch {
-                NSLog("Ports on Mac helper unregister failed: \(error.localizedDescription)")
-            }
-            for _ in 0..<30 {
-                if daemon.status != .enabled { break }
-                try await Task.sleep(for: .milliseconds(100))
-            }
-        }
-
-        switch daemon.status {
-        case .enabled:
-            do {
-                try daemon.register()
-            } catch {
-                NSLog("Ports on Mac helper register while enabled: \(error.localizedDescription)")
-            }
-        case .notRegistered, .notFound:
-            try daemon.register()
-        case .requiresApproval:
-            throw ProxyHelperError.requiresApproval
-        default:
-            throw ProxyHelperError.notEnabled
-        }
-
-        switch daemon.status {
-        case .enabled:
-            return
-        case .requiresApproval:
-            throw ProxyHelperError.requiresApproval
-        default:
-            throw ProxyHelperError.notEnabled
-        }
-    }
-
     private func setLiveDomains(_ domains: [String], enableHTTPS: Bool) async throws {
         if enableHTTPS {
-            try await withHelper(interface: NSXPCInterface(with: ProxyHelperXPCProtocol.self)) { proxy, resumeOnce, connection in
-                guard let helper = proxy as? ProxyHelperXPCProtocol else {
+            try await withHelper(interface: NSXPCInterface(with: ProxyHelperHTTPSXPCProtocol.self)) { proxy, resumeOnce, connection in
+                guard let helper = proxy as? ProxyHelperHTTPSXPCProtocol else {
                     resumeOnce.resume(throwing: ProxyHelperError.unreachable)
                     connection.invalidate()
                     return
@@ -197,8 +281,8 @@ final class ProxyHelperClient: @unchecked Sendable {
     }
 
     private func installTrustedRootOnce(_ certificateDER: Data) async throws {
-        try await withHelper(interface: NSXPCInterface(with: ProxyHelperXPCProtocol.self)) { proxy, resumeOnce, connection in
-            guard let helper = proxy as? ProxyHelperXPCProtocol else {
+        try await withHelper(interface: NSXPCInterface(with: ProxyHelperTrustXPCProtocol.self)) { proxy, resumeOnce, connection in
+            guard let helper = proxy as? ProxyHelperTrustXPCProtocol else {
                 resumeOnce.resume(throwing: ProxyHelperError.unreachable)
                 connection.invalidate()
                 return
@@ -209,6 +293,40 @@ final class ProxyHelperClient: @unchecked Sendable {
                 } else {
                     resumeOnce.resume(throwing: ProxyHelperError.remote(message ?? "The helper could not trust the local HTTPS certificate."))
                 }
+                connection.invalidate()
+            }
+        }
+    }
+
+    private func fetchHelperVersion() async throws -> String {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            let connection = NSXPCConnection(
+                machServiceName: ProxyConstants.machServiceName,
+                options: .privileged
+            )
+            connection.remoteObjectInterface = NSXPCInterface(with: ProxyHelperVersionXPCProtocol.self)
+            let resumeOnce = ResumeOnceValue<String>(continuation)
+            connection.invalidationHandler = {
+                resumeOnce.resume(throwing: ProxyHelperError.unreachable)
+            }
+            connection.interruptionHandler = {
+                resumeOnce.resume(throwing: ProxyHelperError.unreachable)
+            }
+            connection.resume()
+
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                resumeOnce.resume(throwing: Self.mappedXPCError(error))
+                connection.invalidate()
+            }
+
+            guard let helper = proxy as? ProxyHelperVersionXPCProtocol else {
+                resumeOnce.resume(throwing: ProxyHelperError.unreachable)
+                connection.invalidate()
+                return
+            }
+
+            helper.helperVersion { version in
+                resumeOnce.resume(returning: version)
                 connection.invalidate()
             }
         }
@@ -280,6 +398,31 @@ private final class ResumeOnce: @unchecked Sendable {
         self.continuation = nil
         lock.unlock()
         continuation?.resume()
+    }
+
+    func resume(throwing error: Error) {
+        lock.lock()
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(throwing: error)
+    }
+}
+
+private final class ResumeOnceValue<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Error>?
+
+    init(_ continuation: CheckedContinuation<Value, Error>) {
+        self.continuation = continuation
+    }
+
+    func resume(returning value: Value) {
+        lock.lock()
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(returning: value)
     }
 
     func resume(throwing error: Error) {

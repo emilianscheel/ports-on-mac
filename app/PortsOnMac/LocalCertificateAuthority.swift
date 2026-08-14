@@ -50,6 +50,97 @@ final class LocalCertificateAuthority: @unchecked Sendable {
         try prepareCALocked()
     }
 
+    func installUserTrust() throws {
+        let der = try certificateDER
+        guard let certificate = SecCertificateCreateWithData(nil, der as CFData) else {
+            throw LocalCertificateError.encoding
+        }
+        if Self.isTrusted(certificate) {
+            return
+        }
+
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassCertificate,
+            kSecValueRef as String: certificate,
+            kSecAttrLabel as String: "Ports on Mac Local CA"
+        ]
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        if addStatus != errSecSuccess && addStatus != errSecDuplicateItem {
+            throw NSError(
+                domain: NSOSStatusErrorDomain,
+                code: Int(addStatus),
+                userInfo: [NSLocalizedDescriptionKey: "Could not store the local HTTPS certificate."]
+            )
+        }
+
+        let status = SecTrustSettingsSetTrustSettings(certificate, .user, nil)
+        if status == errSecSuccess || Self.isTrusted(certificate) {
+            return
+        }
+
+        try Self.addTrustedCertWithSecurityTool(der)
+        if Self.isTrusted(certificate) {
+            return
+        }
+
+        let message = SecCopyErrorMessageString(status, nil) as String?
+            ?? "Could not trust the local HTTPS certificate."
+        throw NSError(
+            domain: NSOSStatusErrorDomain,
+            code: Int(status),
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+    }
+
+    private static func isTrusted(_ certificate: SecCertificate) -> Bool {
+        var settings: CFArray?
+        if SecTrustSettingsCopyTrustSettings(certificate, .user, &settings) == errSecSuccess {
+            return true
+        }
+        if SecTrustSettingsCopyTrustSettings(certificate, .admin, &settings) == errSecSuccess {
+            return true
+        }
+        return false
+    }
+
+    private static func addTrustedCertWithSecurityTool(_ der: Data) throws {
+        let temp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ports-on-mac-ca-\(UUID().uuidString).cer")
+        try der.write(to: temp)
+        defer { try? FileManager.default.removeItem(at: temp) }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "add-trusted-cert",
+            "-r", "trustRoot",
+            "-p", "ssl",
+            "-p", "basic",
+            temp.path
+        ]
+        let stderr = Pipe()
+        process.standardError = stderr
+        process.standardOutput = Pipe()
+        try process.run()
+        process.waitUntilExit()
+
+        if process.terminationStatus == 0 {
+            return
+        }
+
+        let message = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        throw NSError(
+            domain: "PortsOnMac",
+            code: Int(process.terminationStatus),
+            userInfo: [
+                NSLocalizedDescriptionKey: message?.isEmpty == false
+                    ? message!
+                    : "Could not trust the local HTTPS certificate."
+            ]
+        )
+    }
+
     func identity(for domains: [String]) throws -> SecIdentity {
         let normalized = Array(Set(domains.map { $0.lowercased() })).sorted()
         lock.lock()

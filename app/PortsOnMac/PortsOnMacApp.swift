@@ -10,6 +10,10 @@ struct PortsOnMacApp: App {
             Foundation.exit(0)
         }
 
+        if CommandLine.arguments.contains("--replace-helper") {
+            Foundation.exit(ProxyHelperClient.replaceHelperFromCommandLine())
+        }
+
         guard CommandLine.arguments.contains("--debug-scan") else { return }
 
         for section in PortScanner().scan() {
