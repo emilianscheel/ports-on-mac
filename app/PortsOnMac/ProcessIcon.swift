@@ -22,7 +22,7 @@ enum ProcessIcon {
 
     static func liveDot() -> NSImage {
         let image = NSImage(size: menuSize, flipped: false) { rect in
-            NSColor.systemGreen.setFill()
+            NSColor.secondaryLabelColor.setFill()
             let dot = NSRect(x: rect.midX - 3, y: rect.midY - 3, width: 6, height: 6)
             NSBezierPath(ovalIn: dot).fill()
             return true

@@ -183,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
         menu.addItem(liveItem)
 
-        let stats = "Inbound (\(inboundCount))  |  Outbound (\(outboundCount))"
+        let stats = "\(inboundCount) inbound, \(outboundCount) outbound"
         let statsItem = NSMenuItem(title: stats, action: nil, keyEquivalent: "")
         statsItem.isEnabled = false
         statsItem.image = ProcessIcon.placeholder()
@@ -271,23 +271,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openItem.isEnabled = entry.openURL(domain: domain) != nil
         processMenu.addItem(openItem)
 
-        if entry.canAssignDomain || domain != nil {
+        if domain != nil {
+            processMenu.addItem(.separator())
+
+            let unassignItem = NSMenuItem(title: "Unassign Domain", action: #selector(unassignDomain(_:)), keyEquivalent: "")
+            unassignItem.target = self
+            unassignItem.image = NSImage(systemSymbolName: "link.slash", accessibilityDescription: "Unassign Domain")
+            unassignItem.representedObject = context
+            processMenu.addItem(unassignItem)
+        } else if entry.canAssignDomain {
             processMenu.addItem(.separator())
 
             let assignItem = NSMenuItem(title: "Assign Domain", action: #selector(assignDomain(_:)), keyEquivalent: "")
             assignItem.target = self
             assignItem.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Assign Domain")
             assignItem.representedObject = context
-            assignItem.isEnabled = entry.canAssignDomain
             processMenu.addItem(assignItem)
-
-            if domain != nil {
-                let unassignItem = NSMenuItem(title: "Unassign Domain", action: #selector(unassignDomain(_:)), keyEquivalent: "")
-                unassignItem.target = self
-                unassignItem.image = NSImage(systemSymbolName: "link.slash", accessibilityDescription: "Unassign Domain")
-                unassignItem.representedObject = context
-                processMenu.addItem(unassignItem)
-            }
         }
 
         processMenu.addItem(.separator())
