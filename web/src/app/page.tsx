@@ -5,8 +5,8 @@ const checkoutHref = `/checkout?products=${process.env.NEXT_PUBLIC_POLAR_PRODUCT
 
 export default function Home() {
     return (
-        <main className="grid min-h-svh grid-cols-1 md:grid-cols-2">
-            <section className="relative flex flex-col items-center justify-center bg-white px-6">
+        <main className="grid grid-cols-1 xl:min-h-svh xl:grid-cols-2">
+            <section className="relative flex min-h-svh w-full flex-col items-center justify-center bg-white px-6">
                 <div className="flex flex-col items-center">
                     <Image
                         src="/icon.png"
@@ -42,11 +42,11 @@ export default function Home() {
                         </Button>
                     </div>
                 </div>
-                <p className="absolute inset-x-0 bottom-8 text-center text-sm text-neutral-400">
+                <p className="absolute inset-x-0 bottom-[max(2rem,env(safe-area-inset-bottom,0px))] text-center text-sm text-neutral-400">
                     7 trial days · $10 one time
                 </p>
             </section>
-            <aside className="hidden min-h-svh bg-neutral-100 md:block" aria-hidden="true" />
+            <aside className="min-h-svh w-full bg-neutral-100" aria-hidden="true" />
         </main>
     );
 }
