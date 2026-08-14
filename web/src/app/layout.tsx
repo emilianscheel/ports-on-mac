@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
     title: "Ports on Mac",
-    description: "minimal macos menu bar app for inspecting used ports and freeing them quickly",
+    description: "macos menu bar app that gives local servers real hostnames and frees stuck ports",
     icons: {
         icon: "/icon.png",
     },

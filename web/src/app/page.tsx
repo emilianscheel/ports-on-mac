@@ -20,8 +20,8 @@ export default function Home() {
                         Ports on Mac
                     </h1>
                     <p className="mt-4 max-w-[22rem] text-center text-[15px] leading-relaxed text-neutral-500">
-                        minimal macos menu bar app for inspecting used ports and freeing them
-                        quickly
+                        macos menu bar app that gives local servers real hostnames and frees
+                        stuck ports
                     </p>
                     <div className="mt-10 flex items-center gap-2.5">
                         <Button

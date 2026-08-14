@@ -2,4 +2,4 @@
 
 # 🔌 ports-on-mac
 
-minimal macos menu bar app for inspecting used ports and freeing them quickly
+macos menu bar app that gives local servers real hostnames and frees stuck ports

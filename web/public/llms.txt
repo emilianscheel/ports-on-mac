@@ -1,6 +1,6 @@
 # Ports on Mac
 
-> Minimal macOS menu bar app for inspecting used ports and freeing them quickly. 7-day trial, $10 one-time. macOS 26.0+. Private and on-device.
+> macOS menu bar app that gives local servers real hostnames and frees stuck ports. 7-day trial, $10 one-time. macOS 26.0+. Private and on-device.
 
 Ports on Mac is a menu bar utility for developers who run local servers. It shows which TCP and UDP ports are in use, which process owns each one, lets you open a service in the browser, assign a memorable local hostname (with optional trusted HTTPS), and kill a stuck process to free the port — without using the terminal.
 
