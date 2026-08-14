@@ -423,6 +423,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         for group in section.groups {
             let item = NSMenuItem(title: group.title, action: nil, keyEquivalent: "")
+            item.subtitle = group.subtitle
             if let entry = group.entries.first {
                 item.image = ProcessIcon.image(for: entry)
             } else {
