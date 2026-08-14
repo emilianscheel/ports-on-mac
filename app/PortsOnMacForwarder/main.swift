@@ -49,16 +49,38 @@ private enum ForwarderSecurity {
 private final class ForwarderService: NSObject, ProxyHelperXPCProtocol, @unchecked Sendable {
     static let shared = ForwarderService()
 
-    func setLiveDomains(_ domains: [String], withReply reply: @escaping (Bool, String?) -> Void) {
+    private let httpForwarder = PortForwarder(
+        listenPort: ProxyConstants.httpPort,
+        backendPort: ProxyConstants.userProxyPort,
+        sendsHTTPErrors: true
+    )
+    private let httpsForwarder = PortForwarder(
+        listenPort: ProxyConstants.httpsPort,
+        backendPort: ProxyConstants.userHTTPSProxyPort,
+        sendsHTTPErrors: false
+    )
+
+    func setLiveDomains(_ domains: [String], enableHTTPS: Bool, withReply reply: @escaping (Bool, String?) -> Void) {
         let unique = Array(Set(domains.map { $0.lowercased() })).sorted()
         do {
             if unique.isEmpty {
                 try HostsFile.update(domains: [])
-                try Port80Forwarder.shared.setEnabled(false)
+                try httpForwarder.setEnabled(false)
+                try httpsForwarder.setEnabled(false)
             } else {
-                try Port80Forwarder.shared.setEnabled(true)
+                try httpForwarder.setEnabled(true)
+                try httpsForwarder.setEnabled(enableHTTPS)
                 try HostsFile.update(domains: unique)
             }
+            reply(true, nil)
+        } catch {
+            reply(false, error.localizedDescription)
+        }
+    }
+
+    func installTrustedRoot(_ certificateDER: Data, withReply reply: @escaping (Bool, String?) -> Void) {
+        do {
+            try TrustedRoot.install(certificateDER)
             reply(true, nil)
         } catch {
             reply(false, error.localizedDescription)
@@ -108,6 +130,62 @@ private enum HostsFile {
     }
 }
 
+private enum TrustedRoot {
+    static func install(_ der: Data) throws {
+        if isTrusted(der) {
+            return
+        }
+
+        let temp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ports-on-mac-ca-\(UUID().uuidString).cer")
+        try der.write(to: temp)
+        defer { try? FileManager.default.removeItem(at: temp) }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "add-trusted-cert",
+            "-d",
+            "-r", "trustRoot",
+            "-p", "ssl",
+            "-p", "basic",
+            "-k", "/Library/Keychains/System.keychain",
+            temp.path
+        ]
+        let stderr = Pipe()
+        process.standardError = stderr
+        process.standardOutput = Pipe()
+        try process.run()
+        process.waitUntilExit()
+
+        if process.terminationStatus == 0 || isTrusted(der) {
+            return
+        }
+
+        let message = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        throw NSError(
+            domain: "PortsOnMacForwarder",
+            code: Int(process.terminationStatus),
+            userInfo: [
+                NSLocalizedDescriptionKey: message?.isEmpty == false
+                    ? message!
+                    : "Could not trust the local HTTPS certificate."
+            ]
+        )
+    }
+
+    static func isTrusted(_ der: Data) -> Bool {
+        guard let certificate = SecCertificateCreateWithData(nil, der as CFData) else {
+            return false
+        }
+
+        var settings: CFArray?
+        let status = SecTrustSettingsCopyTrustSettings(certificate, .admin, &settings)
+        return status == errSecSuccess
+    }
+}
+
 private final class BindState: @unchecked Sendable {
     let lock = NSLock()
     let group = DispatchGroup()
@@ -115,12 +193,20 @@ private final class BindState: @unchecked Sendable {
     var error: Error?
 }
 
-private final class Port80Forwarder: @unchecked Sendable {
-    static let shared = Port80Forwarder()
-
-    private let queue = DispatchQueue(label: "com.emilianscheel.ports-on-mac.forwarder")
+private final class PortForwarder: @unchecked Sendable {
+    private let listenPort: UInt16
+    private let backendPort: UInt16
+    private let sendsHTTPErrors: Bool
+    private let queue: DispatchQueue
     private let lock = NSLock()
     private var listener: NWListener?
+
+    init(listenPort: UInt16, backendPort: UInt16, sendsHTTPErrors: Bool) {
+        self.listenPort = listenPort
+        self.backendPort = backendPort
+        self.sendsHTTPErrors = sendsHTTPErrors
+        self.queue = DispatchQueue(label: "com.emilianscheel.ports-on-mac.forwarder.\(listenPort)")
+    }
 
     func setEnabled(_ enabled: Bool) throws {
         if enabled {
@@ -141,7 +227,7 @@ private final class Port80Forwarder: @unchecked Sendable {
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
         parameters.requiredInterfaceType = .loopback
-        let listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: ProxyConstants.httpPort)!)
+        let listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: listenPort)!)
 
         let bindState = BindState()
         bindState.group.enter()
@@ -176,8 +262,8 @@ private final class Port80Forwarder: @unchecked Sendable {
             listener.cancel()
             throw NSError(
                 domain: "PortsOnMacForwarder",
-                code: 80,
-                userInfo: [NSLocalizedDescriptionKey: "Timed out binding port 80. Another process may already be using it."]
+                code: Int(listenPort),
+                userInfo: [NSLocalizedDescriptionKey: "Timed out binding port \(listenPort). Another process may already be using it."]
             )
         }
 
@@ -201,7 +287,7 @@ private final class Port80Forwarder: @unchecked Sendable {
         let parameters = NWParameters(tls: nil, tcp: tcp)
         let backend = NWConnection(
             host: "127.0.0.1",
-            port: NWEndpoint.Port(rawValue: ProxyConstants.userProxyPort)!,
+            port: NWEndpoint.Port(rawValue: backendPort)!,
             using: parameters
         )
 
@@ -211,7 +297,11 @@ private final class Port80Forwarder: @unchecked Sendable {
                 self?.splice(client, backend)
                 self?.splice(backend, client)
             case .failed:
-                self?.sendBadGateway(client)
+                if self?.sendsHTTPErrors == true {
+                    self?.sendBadGateway(client)
+                } else {
+                    client.cancel()
+                }
                 backend.cancel()
             case .cancelled:
                 client.cancel()

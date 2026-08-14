@@ -1,16 +1,20 @@
 import Foundation
 import Network
+import Security
 
 enum LocalProxyError: LocalizedError {
     case bindFailed(Error)
-    case timedOut
+    case timedOut(UInt16)
+    case missingTLSIdentity
 
     var errorDescription: String? {
         switch self {
         case .bindFailed(let error):
             return "Could not start the local proxy: \(error.localizedDescription)"
-        case .timedOut:
-            return "Timed out binding the local proxy on port \(ProxyConstants.userProxyPort)."
+        case .timedOut(let port):
+            return "Timed out binding the local proxy on port \(port)."
+        case .missingTLSIdentity:
+            return "Could not create a local HTTPS identity."
         }
     }
 }
@@ -20,36 +24,104 @@ final class LocalProxyServer: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "com.emilianscheel.ports-on-mac.proxy")
     private let lock = NSLock()
-    private var listener: NWListener?
+    private var httpListener: NWListener?
+    private var tlsListener: NWListener?
     private var routes: [String: Int] = [:]
+    private var lastHTTPSDomains: [String] = []
 
-    func updateRoutes(_ routes: [String: Int]) throws {
+    func updateRoutes(_ routes: [String: Int], httpsDomains: [String] = []) throws {
         let normalized = Dictionary(uniqueKeysWithValues: routes.map { ($0.key.lowercased(), $0.value) })
+        let https = Array(Set(httpsDomains.map { $0.lowercased() })).sorted()
         let shouldStart = queue.sync { () -> Bool in
             self.routes = normalized
             if normalized.isEmpty {
                 self.stopLocked()
+                self.lastHTTPSDomains = []
                 return false
             }
             return true
         }
 
         guard shouldStart else { return }
-        try start()
+        try startHTTP()
+        try updateHTTPS(https)
     }
 
-    private func start() throws {
+    private func startHTTP() throws {
         lock.lock()
-        if listener != nil {
+        if httpListener != nil {
             lock.unlock()
             return
         }
         lock.unlock()
 
+        let listener = try bindListener(
+            parameters: loopbackTCP(),
+            port: ProxyConstants.userProxyPort,
+            proto: "http"
+        )
+
+        lock.lock()
+        self.httpListener = listener
+        lock.unlock()
+    }
+
+    private func updateHTTPS(_ domains: [String]) throws {
+        lock.lock()
+        let domainsChanged = domains != lastHTTPSDomains
+        lastHTTPSDomains = domains
+        let existing = tlsListener
+        lock.unlock()
+
+        if domains.isEmpty {
+            existing?.cancel()
+            lock.lock()
+            tlsListener = nil
+            lock.unlock()
+            return
+        }
+
+        guard domainsChanged || existing == nil else { return }
+
+        existing?.cancel()
+        lock.lock()
+        tlsListener = nil
+        lock.unlock()
+
+        let identity = try LocalCertificateAuthority.shared.identity(for: domains)
+        guard let secIdentity = sec_identity_create(identity) else {
+            throw LocalProxyError.missingTLSIdentity
+        }
+
+        let tls = NWProtocolTLS.Options()
+        sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
+        sec_protocol_options_set_local_identity(tls.securityProtocolOptions, secIdentity)
+
+        let tcp = NWProtocolTCP.Options()
+        let parameters = NWParameters(tls: tls, tcp: tcp)
+        parameters.allowLocalEndpointReuse = true
+        parameters.requiredInterfaceType = .loopback
+
+        let listener = try bindListener(
+            parameters: parameters,
+            port: ProxyConstants.userHTTPSProxyPort,
+            proto: "https"
+        )
+
+        lock.lock()
+        self.tlsListener = listener
+        lock.unlock()
+    }
+
+    private func loopbackTCP() -> NWParameters {
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
         parameters.requiredInterfaceType = .loopback
-        let listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: ProxyConstants.userProxyPort)!)
+        return parameters
+    }
+
+    private func bindListener(parameters: NWParameters, port: UInt16, proto: String) throws -> NWListener {
+        let listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port)!)
 
         let bindState = BindWait()
         bindState.group.enter()
@@ -68,7 +140,7 @@ final class LocalProxyServer: @unchecked Sendable {
                     bindState.error = error
                     bindState.group.leave()
                 }
-                NSLog("Ports on Mac proxy failed: \(error.localizedDescription)")
+                NSLog("Ports on Mac proxy failed on \(port): \(error.localizedDescription)")
                 self?.queue.async {
                     self?.stopLocked()
                 }
@@ -77,7 +149,7 @@ final class LocalProxyServer: @unchecked Sendable {
             }
         }
         listener.newConnectionHandler = { [weak self] connection in
-            self?.handle(connection)
+            self?.handle(connection, proto: proto)
         }
         listener.start(queue: queue)
 
@@ -88,31 +160,31 @@ final class LocalProxyServer: @unchecked Sendable {
         }
         if waitResult == .timedOut {
             listener.cancel()
-            throw LocalProxyError.timedOut
+            throw LocalProxyError.timedOut(port)
         }
 
-        lock.lock()
-        self.listener = listener
-        lock.unlock()
+        return listener
     }
 
     private func stopLocked() {
         lock.lock()
-        listener?.cancel()
-        listener = nil
+        httpListener?.cancel()
+        tlsListener?.cancel()
+        httpListener = nil
+        tlsListener = nil
         lock.unlock()
     }
 
-    private func handle(_ connection: NWConnection) {
+    private func handle(_ connection: NWConnection, proto: String) {
         connection.start(queue: queue)
-        receiveHeaders(from: connection, buffer: Data())
+        receiveHeaders(from: connection, buffer: Data(), proto: proto)
     }
 
-    private func receiveHeaders(from connection: NWConnection, buffer: Data) {
+    private func receiveHeaders(from connection: NWConnection, buffer: Data, proto: String) {
         if let headerRange = buffer.range(of: Data([13, 10, 13, 10])) {
             let headerBlock = buffer[buffer.startIndex..<headerRange.upperBound]
             let leftover = buffer[headerRange.upperBound...]
-            proxy(connection: connection, headerBlock: Data(headerBlock), leftover: Data(leftover))
+            proxy(connection: connection, headerBlock: Data(headerBlock), leftover: Data(leftover), proto: proto)
             return
         }
 
@@ -139,11 +211,11 @@ final class LocalProxyServer: @unchecked Sendable {
                 return
             }
 
-            self.receiveHeaders(from: connection, buffer: next)
+            self.receiveHeaders(from: connection, buffer: next, proto: proto)
         }
     }
 
-    private func proxy(connection client: NWConnection, headerBlock: Data, leftover: Data) {
+    private func proxy(connection client: NWConnection, headerBlock: Data, leftover: Data, proto: String) {
         guard let host = Self.host(fromHeaderBlock: headerBlock) else {
             sendError(client, status: 400, message: "Missing Host header")
             return
@@ -166,7 +238,7 @@ final class LocalProxyServer: @unchecked Sendable {
         backend.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
-                let rewritten = Self.rewrittenHeaders(headerBlock, host: host)
+                let rewritten = Self.rewrittenHeaders(headerBlock, host: host, proto: proto)
                 backend.send(content: rewritten + leftover, completion: .contentProcessed { error in
                     if let error {
                         NSLog("Ports on Mac proxy write failed: \(error.localizedDescription)")
@@ -263,7 +335,7 @@ final class LocalProxyServer: @unchecked Sendable {
         return nil
     }
 
-    static func rewrittenHeaders(_ headerBlock: Data, host: String) -> Data {
+    static func rewrittenHeaders(_ headerBlock: Data, host: String, proto: String = "http") -> Data {
         guard var text = String(data: headerBlock, encoding: .utf8) ?? String(data: headerBlock, encoding: .isoLatin1) else {
             return headerBlock
         }
@@ -292,7 +364,7 @@ final class LocalProxyServer: @unchecked Sendable {
         let insertAt = lines.firstIndex { $0.lowercased().hasPrefix("host:") }.map { $0 + 1 } ?? lines.count
         let forwarded = [
             "X-Forwarded-For: 127.0.0.1",
-            "X-Forwarded-Proto: http",
+            "X-Forwarded-Proto: \(proto)",
             "X-Forwarded-Host: \(host)"
         ]
         for header in forwarded.reversed() {

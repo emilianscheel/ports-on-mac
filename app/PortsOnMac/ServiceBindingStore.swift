@@ -1,6 +1,8 @@
 import Foundation
 
 enum DomainName {
+    static let placeholder = "domain.com"
+
     enum ValidationError: LocalizedError {
         case empty
         case localhost
@@ -10,11 +12,11 @@ enum DomainName {
         var errorDescription: String? {
             switch self {
             case .empty:
-                return "Enter a hostname like all-in-agi.com."
+                return "Enter a hostname like \(DomainName.placeholder)."
             case .localhost:
                 return "localhost cannot be assigned as a custom domain."
             case .invalid:
-                return "Use a hostname like all-in-agi.com, without a port or path."
+                return "Use a hostname like \(DomainName.placeholder), without a port or path."
             case .duplicate(let domain):
                 return "\(domain) is already assigned to another process."
             }
@@ -75,6 +77,7 @@ struct ServiceBinding: Codable, Equatable, Sendable {
     var dockerContainerNames: [String]
     var currentWorkingDirectory: String?
     var assignedAt: Date
+    var usesHTTPS: Bool
 
     init(
         domain: String,
@@ -84,7 +87,8 @@ struct ServiceBinding: Codable, Equatable, Sendable {
         bundleIdentifier: String?,
         dockerContainerNames: [String],
         currentWorkingDirectory: String?,
-        assignedAt: Date = Date()
+        assignedAt: Date = Date(),
+        usesHTTPS: Bool = false
     ) {
         self.domain = domain
         self.port = port
@@ -94,9 +98,10 @@ struct ServiceBinding: Codable, Equatable, Sendable {
         self.dockerContainerNames = dockerContainerNames
         self.currentWorkingDirectory = currentWorkingDirectory
         self.assignedAt = assignedAt
+        self.usesHTTPS = usesHTTPS
     }
 
-    init(domain: String, entry: PortEntry) {
+    init(domain: String, entry: PortEntry, usesHTTPS: Bool = false) {
         self.init(
             domain: domain,
             port: entry.port,
@@ -104,8 +109,40 @@ struct ServiceBinding: Codable, Equatable, Sendable {
             executablePath: entry.executablePath,
             bundleIdentifier: entry.bundleIdentifier,
             dockerContainerNames: entry.dockerContainers.map(\.name),
-            currentWorkingDirectory: entry.currentWorkingDirectory
+            currentWorkingDirectory: entry.currentWorkingDirectory,
+            usesHTTPS: usesHTTPS
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case domain, port, command, executablePath, bundleIdentifier
+        case dockerContainerNames, currentWorkingDirectory, assignedAt, usesHTTPS
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        domain = try container.decode(String.self, forKey: .domain)
+        port = try container.decode(Int.self, forKey: .port)
+        command = try container.decode(String.self, forKey: .command)
+        executablePath = try container.decodeIfPresent(String.self, forKey: .executablePath)
+        bundleIdentifier = try container.decodeIfPresent(String.self, forKey: .bundleIdentifier)
+        dockerContainerNames = try container.decode([String].self, forKey: .dockerContainerNames)
+        currentWorkingDirectory = try container.decodeIfPresent(String.self, forKey: .currentWorkingDirectory)
+        assignedAt = try container.decode(Date.self, forKey: .assignedAt)
+        usesHTTPS = try container.decodeIfPresent(Bool.self, forKey: .usesHTTPS) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(domain, forKey: .domain)
+        try container.encode(port, forKey: .port)
+        try container.encode(command, forKey: .command)
+        try container.encodeIfPresent(executablePath, forKey: .executablePath)
+        try container.encodeIfPresent(bundleIdentifier, forKey: .bundleIdentifier)
+        try container.encode(dockerContainerNames, forKey: .dockerContainerNames)
+        try container.encodeIfPresent(currentWorkingDirectory, forKey: .currentWorkingDirectory)
+        try container.encode(assignedAt, forKey: .assignedAt)
+        try container.encode(usesHTTPS, forKey: .usesHTTPS)
     }
 
     func matchRank(against entry: PortEntry) -> Int? {
@@ -190,7 +227,7 @@ final class ServiceBindingStore: @unchecked Sendable {
         }
     }
 
-    func assign(domain rawDomain: String, to entry: PortEntry) throws {
+    func assign(domain rawDomain: String, to entry: PortEntry, usesHTTPS: Bool = false) throws {
         let domain = try DomainName.normalize(rawDomain)
 
         try queue.sync {
@@ -200,7 +237,7 @@ final class ServiceBindingStore: @unchecked Sendable {
             }
 
             bindings.removeAll { $0.matchRank(against: entry) != nil || $0.domain.lowercased() == domain }
-            bindings.append(ServiceBinding(domain: domain, entry: entry))
+            bindings.append(ServiceBinding(domain: domain, entry: entry, usesHTTPS: usesHTTPS))
             try persistLocked()
         }
     }
@@ -228,11 +265,7 @@ final class ServiceBindingStore: @unchecked Sendable {
     }
 
     private static func defaultFileURL() -> URL {
-        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        return root
-            .appendingPathComponent("com.emilianscheel.ports-on-mac", isDirectory: true)
-            .appendingPathComponent("bindings.json")
+        ProxyConstants.applicationSupportDirectory.appendingPathComponent("bindings.json")
     }
 
     private static func load(from url: URL) -> [ServiceBinding] {

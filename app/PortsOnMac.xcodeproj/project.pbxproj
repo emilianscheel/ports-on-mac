@@ -23,6 +23,10 @@
 		1A0000020000000000000038 /* ProcessMetadata.c in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000000021 /* ProcessMetadata.c */; };
 		1A000002000000000000003E /* FaviconStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000000027 /* FaviconStore.swift */; };
 		1A000002000000000000003F /* AboutWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000000028 /* AboutWindow.swift */; };
+		1A0000020000000000000043 /* LastDomainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000000029 /* LastDomainStore.swift */; };
+		1A0000020000000000000044 /* LocalCertificateAuthority.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000002000000000000002A /* LocalCertificateAuthority.swift */; };
+		1A0000020000000000000045 /* X509 in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000010000000000000073 /* X509 */; };
+		1A0000020000000000000046 /* Crypto in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000010000000000000075 /* Crypto */; };
 		1A0000020000000000000039 /* ProxyConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000002000000000000001D /* ProxyConstants.swift */; };
 		1A000002000000000000003A /* ProxyHelperProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000002000000000000001E /* ProxyHelperProtocol.swift */; };
 		1A000002000000000000003B /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000000025 /* main.swift */; };
@@ -89,6 +93,8 @@
 		1A0000020000000000000026 /* PortsOnMacForwarder */ = {isa = PBXFileReference; explicitFileType = compiled.mach-o.executable; includeInIndex = 0; path = PortsOnMacForwarder; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0000020000000000000027 /* FaviconStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaviconStore.swift; sourceTree = "<group>"; };
 		1A0000020000000000000028 /* AboutWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutWindow.swift; sourceTree = "<group>"; };
+		1A0000020000000000000029 /* LastDomainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LastDomainStore.swift; sourceTree = "<group>"; };
+		1A000002000000000000002A /* LocalCertificateAuthority.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCertificateAuthority.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -97,6 +103,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A0000010000000000000005 /* Sparkle in Frameworks */,
+				1A0000020000000000000045 /* X509 in Frameworks */,
+				1A0000020000000000000046 /* Crypto in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -130,7 +138,9 @@
 				1A0000020000000000000019 /* ProcessIcon.swift */,
 				1A0000020000000000000027 /* FaviconStore.swift */,
 				1A000002000000000000001A /* ServiceBindingStore.swift */,
+				1A0000020000000000000029 /* LastDomainStore.swift */,
 				1A000002000000000000001B /* LocalProxyServer.swift */,
+				1A000002000000000000002A /* LocalCertificateAuthority.swift */,
 				1A000002000000000000001C /* ProxyHelperClient.swift */,
 				1A000002000000000000001D /* ProxyConstants.swift */,
 				1A000002000000000000001E /* ProxyHelperProtocol.swift */,
@@ -192,6 +202,8 @@
 			name = "Ports on Mac";
 			packageProductDependencies = (
 				1A0000010000000000000071 /* Sparkle */,
+				1A0000010000000000000073 /* X509 */,
+				1A0000010000000000000075 /* Crypto */,
 			);
 			productName = "Ports on Mac";
 			productReference = 1A0000010000000000000010 /* Ports on Mac.app */;
@@ -242,6 +254,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				1A0000010000000000000070 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				1A0000010000000000000072 /* XCRemoteSwiftPackageReference "swift-certificates" */,
+				1A0000010000000000000074 /* XCRemoteSwiftPackageReference "swift-crypto" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1A0000010000000000000032 /* Products */;
@@ -278,7 +292,9 @@
 				1A0000020000000000000031 /* ProcessIcon.swift in Sources */,
 				1A000002000000000000003E /* FaviconStore.swift in Sources */,
 				1A0000020000000000000032 /* ServiceBindingStore.swift in Sources */,
+				1A0000020000000000000043 /* LastDomainStore.swift in Sources */,
 				1A0000020000000000000033 /* LocalProxyServer.swift in Sources */,
+				1A0000020000000000000044 /* LocalCertificateAuthority.swift in Sources */,
 				1A0000020000000000000034 /* ProxyHelperClient.swift in Sources */,
 				1A0000020000000000000035 /* ProxyConstants.swift in Sources */,
 				1A0000020000000000000036 /* ProxyHelperProtocol.swift in Sources */,
@@ -559,6 +575,22 @@
 				version = 2.9.4;
 			};
 		};
+		1A0000010000000000000072 /* XCRemoteSwiftPackageReference "swift-certificates" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-certificates";
+			requirement = {
+				kind = exactVersion;
+				version = 1.19.4;
+			};
+		};
+		1A0000010000000000000074 /* XCRemoteSwiftPackageReference "swift-crypto" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-crypto";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.12.3;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -566,6 +598,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1A0000010000000000000070 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		1A0000010000000000000073 /* X509 */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A0000010000000000000072 /* XCRemoteSwiftPackageReference "swift-certificates" */;
+			productName = X509;
+		};
+		1A0000010000000000000075 /* Crypto */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A0000010000000000000074 /* XCRemoteSwiftPackageReference "swift-crypto" */;
+			productName = Crypto;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

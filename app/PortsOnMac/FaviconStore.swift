@@ -17,9 +17,9 @@ final class FaviconStore: @unchecked Sendable {
         return URLSession(configuration: configuration)
     }()
 
-    func cachedImage(for entry: PortEntry, domain: String?) -> NSImage? {
+    func cachedImage(for entry: PortEntry, domain: String?, usesHTTPS: Bool = false) -> NSImage? {
         queue.sync {
-            for key in cacheKeys(for: entry, domain: domain) {
+            for key in cacheKeys(for: entry, domain: domain, usesHTTPS: usesHTTPS) {
                 if let image = images[key] {
                     return image
                 }
@@ -28,9 +28,9 @@ final class FaviconStore: @unchecked Sendable {
         }
     }
 
-    func prefetch(for entry: PortEntry, domain: String?) {
-        let keys = cacheKeys(for: entry, domain: domain)
-        let origins = iconOrigins(for: entry, domain: domain)
+    func prefetch(for entry: PortEntry, domain: String?, usesHTTPS: Bool = false) {
+        let keys = cacheKeys(for: entry, domain: domain, usesHTTPS: usesHTTPS)
+        let origins = iconOrigins(for: entry, domain: domain, usesHTTPS: usesHTTPS)
         guard !keys.isEmpty, !origins.isEmpty else { return }
 
         queue.async { [weak self] in
@@ -126,14 +126,17 @@ final class FaviconStore: @unchecked Sendable {
         }.resume()
     }
 
-    private func cacheKeys(for entry: PortEntry, domain: String?) -> [String] {
-        iconOrigins(for: entry, domain: domain).map(\.absoluteString)
+    private func cacheKeys(for entry: PortEntry, domain: String?, usesHTTPS: Bool) -> [String] {
+        iconOrigins(for: entry, domain: domain, usesHTTPS: usesHTTPS).map(\.absoluteString)
     }
 
-    private func iconOrigins(for entry: PortEntry, domain: String?) -> [URL] {
+    private func iconOrigins(for entry: PortEntry, domain: String?, usesHTTPS: Bool) -> [URL] {
         var origins: [URL] = []
-        if let domain, let url = URL(string: "http://\(domain)") {
-            origins.append(url)
+        if let domain {
+            let scheme = usesHTTPS ? "https" : "http"
+            if let url = URL(string: "\(scheme)://\(domain)") {
+                origins.append(url)
+            }
         }
         if let openURL = entry.openURL {
             origins.append(openURL)

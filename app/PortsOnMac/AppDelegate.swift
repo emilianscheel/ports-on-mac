@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let aboutWindow = AboutWindowController()
     private var updater: SPUUpdater?
     private var lastSyncedDomains: [String] = []
+    private var lastSyncedHTTPS = false
     private var hasSyncedLiveDomains = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -47,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        try? LocalProxyServer.shared.updateRoutes([:])
+        try? LocalProxyServer.shared.updateRoutes([:], httpsDomains: [])
         ProxyHelperClient.shared.clearLiveDomainsBlocking()
     }
 
@@ -166,20 +167,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func applyProxy(snapshot: MenuSnapshot, forceHelper: Bool) async throws {
         let routes = Dictionary(uniqueKeysWithValues: snapshot.services.map { ($0.binding.domain, $0.entry.port) })
         let domains = snapshot.services.map(\.binding.domain)
-        try LocalProxyServer.shared.updateRoutes(routes)
+        let httpsDomains = snapshot.services.filter(\.binding.usesHTTPS).map(\.binding.domain)
+        let enableHTTPS = !httpsDomains.isEmpty
 
-        guard forceHelper || domains != lastSyncedDomains || !hasSyncedLiveDomains else { return }
-        lastSyncedDomains = domains
-        hasSyncedLiveDomains = true
+        if enableHTTPS {
+            try LocalCertificateAuthority.shared.prepareCA()
+        }
+        try LocalProxyServer.shared.updateRoutes(routes, httpsDomains: httpsDomains)
+
+        let shouldSyncHelper = forceHelper || domains != lastSyncedDomains || enableHTTPS != lastSyncedHTTPS || !hasSyncedLiveDomains
+        guard shouldSyncHelper else { return }
 
         if !domains.isEmpty {
             try ProxyHelperClient.shared.prepareForAssignment()
         }
         if ProxyHelperClient.shared.status == .enabled {
-            try await ProxyHelperClient.shared.syncLiveDomains(domains)
+            if enableHTTPS {
+                try await ProxyHelperClient.shared.installTrustedRoot(try LocalCertificateAuthority.shared.certificateDER)
+            }
+            try await ProxyHelperClient.shared.syncLiveDomains(domains, enableHTTPS: enableHTTPS)
         } else if !domains.isEmpty {
             throw ProxyHelperError.notEnabled
         }
+
+        lastSyncedDomains = domains
+        lastSyncedHTTPS = enableHTTPS
+        hasSyncedLiveDomains = true
     }
 
     private func addStatusHeader(inboundCount: Int, outboundCount: Int) {
@@ -217,8 +230,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for service in services {
             let item = NSMenuItem(title: service.binding.domain, action: nil, keyEquivalent: "")
             item.subtitle = ":\(service.entry.port)  \(service.entry.displayCommand)"
-            item.image = ProcessIcon.image(for: service.entry, domain: service.binding.domain)
-            item.submenu = makeProcessMenu(for: service.entry, domain: service.binding.domain)
+            item.image = ProcessIcon.image(for: service.entry, domain: service.binding.domain, usesHTTPS: service.binding.usesHTTPS)
+            item.submenu = makeProcessMenu(for: service.entry, binding: service.binding)
             menu.addItem(item)
         }
     }
@@ -249,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func makePortMenu(for group: PortGroup) -> NSMenu {
         if group.hasSingleProcess, let entry = group.entries.first {
-            return makeProcessMenu(for: entry, domain: bindings.binding(matching: entry)?.domain)
+            return makeProcessMenu(for: entry, binding: bindings.binding(matching: entry))
         }
 
         let portMenu = NSMenu()
@@ -257,15 +270,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for entry in group.entries {
             let processItem = NSMenuItem(title: entry.processTitle, action: nil, keyEquivalent: "")
             processItem.image = ProcessIcon.image(for: entry)
-            processItem.submenu = makeProcessMenu(for: entry, domain: bindings.binding(matching: entry)?.domain)
+            processItem.submenu = makeProcessMenu(for: entry, binding: bindings.binding(matching: entry))
             portMenu.addItem(processItem)
         }
 
         return portMenu
     }
 
-    private func makeProcessMenu(for entry: PortEntry, domain: String?) -> NSMenu {
+    private func makeProcessMenu(for entry: PortEntry, binding: ServiceBinding?) -> NSMenu {
         let processMenu = NSMenu()
+        let domain = binding?.domain
+        let usesHTTPS = binding?.usesHTTPS ?? false
         let context = PortMenuContext(entry: entry, domain: domain)
 
         for detail in entry.details {
@@ -279,8 +294,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let openItem = NSMenuItem(title: "Open", action: #selector(openPort(_:)), keyEquivalent: "")
         openItem.target = self
         openItem.image = NSImage(systemSymbolName: "arrow.up.forward.square", accessibilityDescription: "Open")
-        openItem.representedObject = entry.openURL(domain: domain)
-        openItem.isEnabled = entry.openURL(domain: domain) != nil
+        openItem.representedObject = entry.openURL(domain: domain, usesHTTPS: usesHTTPS)
+        openItem.isEnabled = entry.openURL(domain: domain, usesHTTPS: usesHTTPS) != nil
         processMenu.addItem(openItem)
 
         if domain != nil {
@@ -288,7 +303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             let unassignItem = NSMenuItem(title: "Unassign Domain", action: #selector(unassignDomain(_:)), keyEquivalent: "")
             unassignItem.target = self
-            unassignItem.image = NSImage(systemSymbolName: "link.slash", accessibilityDescription: "Unassign Domain")
+            unassignItem.image = NSImage(systemSymbolName: "network.slash", accessibilityDescription: "Unassign Domain")
             unassignItem.representedObject = context
             processMenu.addItem(unassignItem)
         } else if entry.canAssignDomain {
@@ -351,20 +366,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         NSApp.activate(ignoringOtherApps: true)
 
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 21))
-        field.placeholderString = "all-in-agi.com"
-        field.stringValue = context.domain ?? ""
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 21))
+        field.placeholderString = LastDomainStore.shared.domain(for: context.entry) ?? DomainName.placeholder
+        field.stringValue = ""
         field.isBezeled = true
         field.bezelStyle = .roundedBezel
         field.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
 
+        let httpsCheckbox = NSButton(checkboxWithTitle: "Enable HTTPS", target: nil, action: nil)
+        httpsCheckbox.state = .off
+        httpsCheckbox.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+
+        let accessory = NSStackView(views: [field, httpsCheckbox])
+        accessory.orientation = .vertical
+        accessory.alignment = .leading
+        accessory.spacing = 8
+        accessory.translatesAutoresizingMaskIntoConstraints = false
+        field.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        accessory.layoutSubtreeIfNeeded()
+        accessory.frame = NSRect(x: 0, y: 0, width: 260, height: accessory.fittingSize.height)
+
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = "Assign Domain"
-        alert.informativeText = "This hostname will open locally and proxy to this process."
+        alert.informativeText = "This hostname will open locally and proxy to this process. HTTPS uses a local certificate trusted on this Mac."
         alert.addButton(withTitle: "Assign")
         alert.addButton(withTitle: "Cancel")
-        alert.accessoryView = field
+        alert.accessoryView = accessory
         alert.window.initialFirstResponder = field
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -372,16 +400,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task { @MainActor in
             do {
                 let domain = try DomainName.normalize(field.stringValue)
+                let usesHTTPS = httpsCheckbox.state == .on
                 try ProxyHelperClient.shared.prepareForAssignment()
-                try bindings.assign(domain: field.stringValue, to: context.entry)
+                try bindings.assign(domain: field.stringValue, to: context.entry, usesHTTPS: usesHTTPS)
                 lastSyncedDomains = []
+                lastSyncedHTTPS = false
                 do {
                     try await applyProxy(snapshot: makeSnapshot(), forceHelper: true)
                 } catch {
                     try? bindings.unassign(domain: domain)
                     lastSyncedDomains = []
+                    lastSyncedHTTPS = false
                     throw error
                 }
+                LastDomainStore.shared.remember(domain, for: context.entry)
                 rebuildMenu()
             } catch ProxyHelperError.requiresApproval {
                 showHelperApprovalAlert()
@@ -402,6 +434,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 try bindings.unassign(entry: context.entry)
             }
             lastSyncedDomains = []
+            lastSyncedHTTPS = false
             rebuildMenu()
         } catch {
             presentError(error, title: "Couldn’t unassign domain")

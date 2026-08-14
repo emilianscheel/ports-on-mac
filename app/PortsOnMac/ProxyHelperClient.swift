@@ -9,7 +9,7 @@ enum ProxyHelperError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .requiresApproval:
-            return "Enable the Ports on Mac helper in System Settings → General → Login Items & Extensions so local domains can use port 80."
+            return "Enable the Ports on Mac helper in System Settings → General → Login Items & Extensions so local domains can use port 80 and HTTPS on port 443."
         case .notEnabled:
             return "The Ports on Mac helper is not enabled."
         case .remote(let message):
@@ -50,11 +50,34 @@ final class ProxyHelperClient: @unchecked Sendable {
         }
     }
 
-    func syncLiveDomains(_ domains: [String]) async throws {
+    func syncLiveDomains(_ domains: [String], enableHTTPS: Bool) async throws {
+        try await retry {
+            try await self.setLiveDomains(domains, enableHTTPS: enableHTTPS)
+        }
+    }
+
+    func installTrustedRoot(_ certificateDER: Data) async throws {
+        try await retry {
+            try await self.installTrustedRootOnce(certificateDER)
+        }
+    }
+
+    func clearLiveDomainsBlocking() {
+        guard daemon.status == .enabled else { return }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        Task.detached {
+            try? await self.setLiveDomains([], enableHTTPS: false)
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 2)
+    }
+
+    private func retry(_ work: @escaping () async throws -> Void) async throws {
         var lastError: Error = ProxyHelperError.notEnabled
         for attempt in 0..<8 {
             do {
-                try await setLiveDomains(domains)
+                try await work()
                 return
             } catch {
                 lastError = error
@@ -64,18 +87,35 @@ final class ProxyHelperClient: @unchecked Sendable {
         throw lastError
     }
 
-    func clearLiveDomainsBlocking() {
-        guard daemon.status == .enabled else { return }
-
-        let semaphore = DispatchSemaphore(value: 0)
-        Task.detached {
-            try? await self.setLiveDomains([])
-            semaphore.signal()
+    private func setLiveDomains(_ domains: [String], enableHTTPS: Bool) async throws {
+        try await withHelper { helper, resumeOnce, connection in
+            helper.setLiveDomains(domains, enableHTTPS: enableHTTPS) { ok, message in
+                if ok {
+                    resumeOnce.resume()
+                } else {
+                    resumeOnce.resume(throwing: ProxyHelperError.remote(message ?? "The helper could not update local domains."))
+                }
+                connection.invalidate()
+            }
         }
-        _ = semaphore.wait(timeout: .now() + 2)
     }
 
-    private func setLiveDomains(_ domains: [String]) async throws {
+    private func installTrustedRootOnce(_ certificateDER: Data) async throws {
+        try await withHelper { helper, resumeOnce, connection in
+            helper.installTrustedRoot(certificateDER) { ok, message in
+                if ok {
+                    resumeOnce.resume()
+                } else {
+                    resumeOnce.resume(throwing: ProxyHelperError.remote(message ?? "The helper could not trust the local HTTPS certificate."))
+                }
+                connection.invalidate()
+            }
+        }
+    }
+
+    private func withHelper(
+        _ body: @escaping (ProxyHelperXPCProtocol, ResumeOnce, NSXPCConnection) -> Void
+    ) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let connection = NSXPCConnection(
                 machServiceName: ProxyConstants.machServiceName,
@@ -103,14 +143,7 @@ final class ProxyHelperClient: @unchecked Sendable {
                 return
             }
 
-            helper.setLiveDomains(domains) { ok, message in
-                if ok {
-                    resumeOnce.resume()
-                } else {
-                    resumeOnce.resume(throwing: ProxyHelperError.remote(message ?? "The helper could not update local domains."))
-                }
-                connection.invalidate()
-            }
+            body(helper, resumeOnce, connection)
         }
     }
 }

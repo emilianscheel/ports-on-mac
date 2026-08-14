@@ -164,9 +164,10 @@ struct PortEntry {
         "UserEvent", "wifip2pd", "containermanagerd"
     ]
 
-    func openURL(domain: String?) -> URL? {
+    func openURL(domain: String?, usesHTTPS: Bool = false) -> URL? {
         if let domain, !domain.isEmpty {
-            return URL(string: "http://\(domain)")
+            let scheme = usesHTTPS ? "https" : "http"
+            return URL(string: "\(scheme)://\(domain)")
         }
         return openURL
     }

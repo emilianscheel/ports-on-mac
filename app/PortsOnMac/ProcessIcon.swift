@@ -3,16 +3,16 @@ import AppKit
 enum ProcessIcon {
     static let menuSize = NSSize(width: 16, height: 16)
 
-    static func image(for entry: PortEntry, domain: String? = nil) -> NSImage {
+    static func image(for entry: PortEntry, domain: String? = nil, usesHTTPS: Bool = false) -> NSImage {
         if let icon = appIcon(for: entry) {
             return scaled(icon)
         }
 
-        if let favicon = FaviconStore.shared.cachedImage(for: entry, domain: domain) {
+        if let favicon = FaviconStore.shared.cachedImage(for: entry, domain: domain, usesHTTPS: usesHTTPS) {
             return scaled(favicon)
         }
 
-        FaviconStore.shared.prefetch(for: entry, domain: domain)
+        FaviconStore.shared.prefetch(for: entry, domain: domain, usesHTTPS: usesHTTPS)
         return placeholder()
     }
 
