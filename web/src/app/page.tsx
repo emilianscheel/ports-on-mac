@@ -54,15 +54,15 @@ export default function Home() {
                     7 trial days · $10 one time
                 </p>
             </section>
-            <aside className="flex w-full items-center justify-center bg-[#E3E4E4] px-6 py-16 xl:min-h-svh">
+            <aside className="flex w-full items-center justify-center bg-neutral-100 px-6 py-16 xl:min-h-svh">
                 <Image
                     src="/screenshot.png"
                     alt="Ports on Mac menu bar showing live inbound ports and a domain assigned to a local server"
-                    width={711}
+                    width={699}
                     height={1024}
                     priority
                     sizes="(min-width: 1280px) 40vw, 70vw"
-                    className="h-auto w-[70vw] object-contain xl:w-auto xl:max-h-[70vh]"
+                    className="h-auto w-[70vw] object-contain xl:h-[70vh] xl:w-auto"
                 />
             </aside>
         </main>
