@@ -31,7 +31,8 @@ final class LocalProxyServer: @unchecked Sendable {
     private var lastHTTPSDomains: [String] = []
 
     func updateRoutes(_ routes: [String: Int], httpsDomains: [String] = []) throws {
-        let normalized = Dictionary(uniqueKeysWithValues: routes.map { ($0.key.lowercased(), $0.value) })
+        let normalized = Dictionary(
+            uniqueKeysWithValues: routes.map { ($0.key.lowercased(), $0.value) })
         let https = Array(Set(httpsDomains.map { $0.lowercased() })).sorted()
         let shouldStart = queue.sync { () -> Bool in
             self.routes = normalized
@@ -122,7 +123,9 @@ final class LocalProxyServer: @unchecked Sendable {
         return parameters
     }
 
-    private func bindListener(parameters: NWParameters, port: UInt16, proto: String) throws -> NWListener {
+    private func bindListener(parameters: NWParameters, port: UInt16, proto: String) throws
+        -> NWListener
+    {
         let listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port)!)
 
         let bindState = BindWait()
@@ -188,7 +191,9 @@ final class LocalProxyServer: @unchecked Sendable {
         if let headerRange = buffer.range(of: Data([13, 10, 13, 10])) {
             let headerBlock = buffer[buffer.startIndex..<headerRange.upperBound]
             let leftover = buffer[headerRange.upperBound...]
-            proxy(connection: connection, headerBlock: Data(headerBlock), leftover: Data(leftover), proto: proto)
+            proxy(
+                connection: connection, headerBlock: Data(headerBlock), leftover: Data(leftover),
+                proto: proto)
             return
         }
 
@@ -197,7 +202,8 @@ final class LocalProxyServer: @unchecked Sendable {
             return
         }
 
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { [weak self] data, _, isComplete, error in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) {
+            [weak self] data, _, isComplete, error in
             guard let self else { return }
             if let error {
                 connection.cancel()
@@ -219,7 +225,9 @@ final class LocalProxyServer: @unchecked Sendable {
         }
     }
 
-    private func proxy(connection client: NWConnection, headerBlock: Data, leftover: Data, proto: String) {
+    private func proxy(
+        connection client: NWConnection, headerBlock: Data, leftover: Data, proto: String
+    ) {
         guard let host = Self.host(fromHeaderBlock: headerBlock) else {
             sendError(client, status: 400, message: "Missing Host header")
             return
@@ -250,16 +258,18 @@ final class LocalProxyServer: @unchecked Sendable {
             case .ready:
                 guard let self else { return }
                 let rewritten = Self.rewrittenHeaders(headerBlock, host: host, proto: proto)
-                backend.send(content: rewritten + leftover, completion: .contentProcessed { error in
-                    if let error {
-                        NSLog("Ports on Mac proxy write failed: \(error.localizedDescription)")
-                        client.cancel()
-                        backend.cancel()
-                        return
-                    }
-                    self.splice(client, backend)
-                    self.splice(backend, client)
-                })
+                backend.send(
+                    content: rewritten + leftover,
+                    completion: .contentProcessed { error in
+                        if let error {
+                            NSLog("Ports on Mac proxy write failed: \(error.localizedDescription)")
+                            client.cancel()
+                            backend.cancel()
+                            return
+                        }
+                        self.splice(client, backend)
+                        self.splice(backend, client)
+                    })
             case .failed(let error):
                 NSLog("Ports on Mac backend connect failed: \(error.localizedDescription)")
                 self?.sendError(client, status: 502, message: "Upstream unavailable")
@@ -275,7 +285,8 @@ final class LocalProxyServer: @unchecked Sendable {
     }
 
     private func splice(_ from: NWConnection, _ to: NWConnection) {
-        from.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
+        from.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) {
+            [weak self] data, _, isComplete, error in
             guard let self else { return }
             if error != nil {
                 to.cancel()
@@ -284,22 +295,26 @@ final class LocalProxyServer: @unchecked Sendable {
             }
 
             if let data, !data.isEmpty {
-                to.send(content: data, isComplete: isComplete, completion: .contentProcessed { sendError in
-                    if sendError != nil || isComplete {
-                        from.cancel()
-                        to.cancel()
-                        return
-                    }
-                    self.splice(from, to)
-                })
+                to.send(
+                    content: data, isComplete: isComplete,
+                    completion: .contentProcessed { sendError in
+                        if sendError != nil || isComplete {
+                            from.cancel()
+                            to.cancel()
+                            return
+                        }
+                        self.splice(from, to)
+                    })
                 return
             }
 
             if isComplete {
-                to.send(content: nil, isComplete: true, completion: .contentProcessed { _ in
-                    to.cancel()
-                    from.cancel()
-                })
+                to.send(
+                    content: nil, isComplete: true,
+                    completion: .contentProcessed { _ in
+                        to.cancel()
+                        from.cancel()
+                    })
                 return
             }
 
@@ -309,42 +324,51 @@ final class LocalProxyServer: @unchecked Sendable {
 
     private func sendRedirect(_ connection: NWConnection, location: String) {
         let body = Data("Redirecting to \(location)\n".utf8)
-        let response = Data(
-            """
-            HTTP/1.1 301 Moved Permanently\r
-            Location: \(location)\r
-            Connection: close\r
-            Content-Type: text/plain; charset=utf-8\r
-            Content-Length: \(body.count)\r
-            \r
-            """.utf8
-        ) + body
+        let response =
+            Data(
+                """
+                HTTP/1.1 301 Moved Permanently\r
+                Location: \(location)\r
+                Connection: close\r
+                Content-Type: text/plain; charset=utf-8\r
+                Content-Length: \(body.count)\r
+                \r
+                """.utf8
+            ) + body
 
-        connection.send(content: response, isComplete: true, completion: .contentProcessed { _ in
-            connection.cancel()
-        })
+        connection.send(
+            content: response, isComplete: true,
+            completion: .contentProcessed { _ in
+                connection.cancel()
+            })
     }
 
     private func sendError(_ connection: NWConnection, status: Int, message: String) {
         let reason = status == 400 ? "Bad Request" : "Bad Gateway"
         let body = Data(message.utf8)
-        let response = Data(
-            """
-            HTTP/1.1 \(status) \(reason)\r
-            Connection: close\r
-            Content-Type: text/plain; charset=utf-8\r
-            Content-Length: \(body.count)\r
-            \r
-            """.utf8
-        ) + body
+        let response =
+            Data(
+                """
+                HTTP/1.1 \(status) \(reason)\r
+                Connection: close\r
+                Content-Type: text/plain; charset=utf-8\r
+                Content-Length: \(body.count)\r
+                \r
+                """.utf8
+            ) + body
 
-        connection.send(content: response, isComplete: true, completion: .contentProcessed { _ in
-            connection.cancel()
-        })
+        connection.send(
+            content: response, isComplete: true,
+            completion: .contentProcessed { _ in
+                connection.cancel()
+            })
     }
 
     static func host(fromHeaderBlock data: Data) -> String? {
-        guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+        guard
+            let text = String(data: data, encoding: .utf8)
+                ?? String(data: data, encoding: .isoLatin1)
+        else {
             return nil
         }
 
@@ -356,7 +380,8 @@ final class LocalProxyServer: @unchecked Sendable {
             if value.hasPrefix("["), let close = value.firstIndex(of: "]") {
                 return String(value[...close]).lowercased()
             }
-            if let colon = value.lastIndex(of: ":"), Int(value[value.index(after: colon)...]) != nil {
+            if let colon = value.lastIndex(of: ":"), Int(value[value.index(after: colon)...]) != nil
+            {
                 value = String(value[..<colon])
             }
             return value.lowercased()
@@ -366,7 +391,10 @@ final class LocalProxyServer: @unchecked Sendable {
     }
 
     static func requestTarget(fromHeaderBlock data: Data) -> String {
-        guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+        guard
+            let text = String(data: data, encoding: .utf8)
+                ?? String(data: data, encoding: .isoLatin1)
+        else {
             return "/"
         }
 
@@ -375,8 +403,10 @@ final class LocalProxyServer: @unchecked Sendable {
         let parts = firstLine.split(separator: " ", omittingEmptySubsequences: true)
         guard parts.count >= 2 else { return "/" }
 
-        var target = String(parts[1])
-        if target.hasPrefix("http://") || target.hasPrefix("https://"), let url = URL(string: target) {
+        let target = String(parts[1])
+        if target.hasPrefix("http://") || target.hasPrefix("https://"),
+            let url = URL(string: target)
+        {
             var path = url.path.isEmpty ? "/" : url.path
             if let query = url.query, !query.isEmpty {
                 path += "?\(query)"
@@ -387,8 +417,12 @@ final class LocalProxyServer: @unchecked Sendable {
         return target.isEmpty ? "/" : target
     }
 
-    static func rewrittenHeaders(_ headerBlock: Data, host: String, proto: String = "http") -> Data {
-        guard var text = String(data: headerBlock, encoding: .utf8) ?? String(data: headerBlock, encoding: .isoLatin1) else {
+    static func rewrittenHeaders(_ headerBlock: Data, host: String, proto: String = "http") -> Data
+    {
+        guard
+            var text = String(data: headerBlock, encoding: .utf8)
+                ?? String(data: headerBlock, encoding: .isoLatin1)
+        else {
             return headerBlock
         }
 
@@ -398,7 +432,8 @@ final class LocalProxyServer: @unchecked Sendable {
             text.removeLast(2)
         }
 
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map {
+            line -> String in
             var value = String(line)
             if value.hasSuffix("\r") {
                 value.removeLast()
@@ -413,11 +448,12 @@ final class LocalProxyServer: @unchecked Sendable {
                 || lowered.hasPrefix("x-forwarded-host:")
         }
 
-        let insertAt = lines.firstIndex { $0.lowercased().hasPrefix("host:") }.map { $0 + 1 } ?? lines.count
+        let insertAt =
+            lines.firstIndex { $0.lowercased().hasPrefix("host:") }.map { $0 + 1 } ?? lines.count
         let forwarded = [
             "X-Forwarded-For: 127.0.0.1",
             "X-Forwarded-Proto: \(proto)",
-            "X-Forwarded-Host: \(host)"
+            "X-Forwarded-Host: \(host)",
         ]
         for header in forwarded.reversed() {
             lines.insert(header, at: insertAt)
