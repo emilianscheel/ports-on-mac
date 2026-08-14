@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let menu = NSMenu()
     private var showOutboundPorts = false
     private let updateUserDriver = UpdateUserDriver(hostBundle: .main)
+    private let aboutWindow = AboutWindowController()
     private var updater: SPUUpdater?
     private var lastSyncedDomains: [String] = []
     private var hasSyncedLiveDomains = false
@@ -106,6 +107,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
         updateItem.isEnabled = updater?.canCheckForUpdates ?? true
         menu.addItem(updateItem)
+
+        let aboutItem = NSMenuItem(title: "About Ports on Mac", action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
+        aboutItem.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "About Ports on Mac")
+        menu.addItem(aboutItem)
 
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
@@ -308,6 +314,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func refresh() {
         rebuildMenu()
+    }
+
+    @objc private func showAbout() {
+        aboutWindow.show()
     }
 
     @objc private func checkForUpdates(_ sender: Any?) {

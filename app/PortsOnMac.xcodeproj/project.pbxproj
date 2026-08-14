@@ -22,6 +22,7 @@
 		1A0000020000000000000037 /* ProcessMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000002000000000000001F /* ProcessMetadata.swift */; };
 		1A0000020000000000000038 /* ProcessMetadata.c in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000000021 /* ProcessMetadata.c */; };
 		1A000002000000000000003E /* FaviconStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000000027 /* FaviconStore.swift */; };
+		1A000002000000000000003F /* AboutWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000000028 /* AboutWindow.swift */; };
 		1A0000020000000000000039 /* ProxyConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000002000000000000001D /* ProxyConstants.swift */; };
 		1A000002000000000000003A /* ProxyHelperProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000002000000000000001E /* ProxyHelperProtocol.swift */; };
 		1A000002000000000000003B /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000000025 /* main.swift */; };
@@ -87,6 +88,7 @@
 		1A0000020000000000000025 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		1A0000020000000000000026 /* PortsOnMacForwarder */ = {isa = PBXFileReference; explicitFileType = compiled.mach-o.executable; includeInIndex = 0; path = PortsOnMacForwarder; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0000020000000000000027 /* FaviconStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaviconStore.swift; sourceTree = "<group>"; };
+		1A0000020000000000000028 /* AboutWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutWindow.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -122,6 +124,7 @@
 			children = (
 				1A0000010000000000000016 /* PortsOnMacApp.swift */,
 				1A0000010000000000000011 /* AppDelegate.swift */,
+				1A0000020000000000000028 /* AboutWindow.swift */,
 				1A0000010000000000000018 /* UpdateUserDriver.swift */,
 				1A0000010000000000000012 /* PortScanner.swift */,
 				1A0000020000000000000019 /* ProcessIcon.swift */,
@@ -269,6 +272,7 @@
 			files = (
 				1A0000010000000000000004 /* PortsOnMacApp.swift in Sources */,
 				1A0000010000000000000001 /* AppDelegate.swift in Sources */,
+				1A000002000000000000003F /* AboutWindow.swift in Sources */,
 				1A0000010000000000000008 /* UpdateUserDriver.swift in Sources */,
 				1A0000010000000000000002 /* PortScanner.swift in Sources */,
 				1A0000020000000000000031 /* ProcessIcon.swift in Sources */,
