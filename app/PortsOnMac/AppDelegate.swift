@@ -121,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 keyEquivalent: ""
             )
             buyItem.target = self
-            buyItem.image = NSImage(systemSymbolName: "cart", accessibilityDescription: "Buy License Key")
+            buyItem.image = NSImage(systemSymbolName: "bag", accessibilityDescription: "Buy License Key")
             menu.addItem(buyItem)
 
             let activateItem = NSMenuItem(
@@ -221,7 +221,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 try LocalProxyServer.shared.updateRoutes(routes, httpsDomains: [])
                 enableHTTPS = false
-                httpsWarning = "The domain still works over HTTP. HTTPS couldn’t be enabled (\(error.localizedDescription)). Use Enable HTTPS to try again."
+                httpsWarning = "The domain still works over HTTP. HTTPS couldn’t be enabled (\(error.localizedDescription)). Choose Use HTTPS to try again."
             }
         } else {
             try LocalProxyServer.shared.updateRoutes(routes, httpsDomains: [])
@@ -293,7 +293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastSyncedDomains = domains
         lastSyncedHTTPS = false
         hasSyncedLiveDomains = true
-        return "The domain still works over HTTP. HTTPS couldn’t be enabled (\(reason)). Use Enable HTTPS to try again."
+        return "The domain still works over HTTP. HTTPS couldn’t be enabled (\(reason)). Choose Use HTTPS to try again."
     }
 
     private func addStatusHeader(inboundCount: Int, outboundCount: Int) {
@@ -394,7 +394,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let openItem = NSMenuItem(title: "Open", action: #selector(openPort(_:)), keyEquivalent: "")
         openItem.target = self
-        openItem.image = NSImage(systemSymbolName: "arrow.up.forward.square", accessibilityDescription: "Open")
+        openItem.image = NSImage(systemSymbolName: "arrow.up.right", accessibilityDescription: "Open")
         openItem.representedObject = entry.openURL(domain: domain, usesHTTPS: usesHTTPS)
         openItem.isEnabled = entry.openURL(domain: domain, usesHTTPS: usesHTTPS) != nil
         processMenu.addItem(openItem)
@@ -403,13 +403,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if domain != nil {
                 processMenu.addItem(.separator())
 
-                let httpsTitle = usesHTTPS ? "Disable HTTPS" : "Enable HTTPS"
-                let httpsItem = NSMenuItem(title: httpsTitle, action: #selector(toggleHTTPS(_:)), keyEquivalent: "")
+                let httpsItem = NSMenuItem(title: "Use HTTPS", action: #selector(toggleHTTPS(_:)), keyEquivalent: "")
                 httpsItem.target = self
-                httpsItem.image = NSImage(
-                    systemSymbolName: usesHTTPS ? "checkmark.circle.fill" : "checkmark.circle",
-                    accessibilityDescription: httpsTitle
-                )
+                httpsItem.image = usesHTTPS
+                    ? NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Use HTTPS")
+                    : nil
                 httpsItem.representedObject = context
                 processMenu.addItem(httpsItem)
 
