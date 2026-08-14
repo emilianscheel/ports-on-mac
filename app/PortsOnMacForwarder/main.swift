@@ -60,6 +60,10 @@ private final class ForwarderService: NSObject, ProxyHelperXPCProtocol, @uncheck
         sendsHTTPErrors: false
     )
 
+    func setLiveDomains(_ domains: [String], withReply reply: @escaping (Bool, String?) -> Void) {
+        setLiveDomains(domains, enableHTTPS: false, withReply: reply)
+    }
+
     func setLiveDomains(_ domains: [String], enableHTTPS: Bool, withReply reply: @escaping (Bool, String?) -> Void) {
         let unique = Array(Set(domains.map { $0.lowercased() })).sorted()
         do {

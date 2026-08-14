@@ -30,19 +30,22 @@ final class ProxyHelperClient: @unchecked Sendable {
     }
 
     func prepareForAssignment() throws {
+        do {
+            try daemon.register()
+        } catch {
+            if daemon.status != .enabled {
+                switch daemon.status {
+                case .requiresApproval:
+                    throw ProxyHelperError.requiresApproval
+                default:
+                    throw ProxyHelperError.notEnabled
+                }
+            }
+        }
+
         switch daemon.status {
         case .enabled:
             return
-        case .notRegistered, .notFound:
-            try daemon.register()
-            switch daemon.status {
-            case .enabled:
-                return
-            case .requiresApproval:
-                throw ProxyHelperError.requiresApproval
-            default:
-                throw ProxyHelperError.notEnabled
-            }
         case .requiresApproval:
             throw ProxyHelperError.requiresApproval
         default:
@@ -89,13 +92,19 @@ final class ProxyHelperClient: @unchecked Sendable {
 
     private func setLiveDomains(_ domains: [String], enableHTTPS: Bool) async throws {
         try await withHelper { helper, resumeOnce, connection in
-            helper.setLiveDomains(domains, enableHTTPS: enableHTTPS) { ok, message in
+            let reply: (Bool, String?) -> Void = { ok, message in
                 if ok {
                     resumeOnce.resume()
                 } else {
                     resumeOnce.resume(throwing: ProxyHelperError.remote(message ?? "The helper could not update local domains."))
                 }
                 connection.invalidate()
+            }
+
+            if enableHTTPS {
+                helper.setLiveDomains(domains, enableHTTPS: true, withReply: reply)
+            } else {
+                helper.setLiveDomains(domains, withReply: reply)
             }
         }
     }
@@ -133,7 +142,7 @@ final class ProxyHelperClient: @unchecked Sendable {
             }
 
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                resumeOnce.resume(throwing: error)
+                resumeOnce.resume(throwing: Self.mappedXPCError(error))
                 connection.invalidate()
             }
 
@@ -145,6 +154,18 @@ final class ProxyHelperClient: @unchecked Sendable {
 
             body(helper, resumeOnce, connection)
         }
+    }
+
+    private static func mappedXPCError(_ error: Error) -> Error {
+        let nsError = error as NSError
+        let description = nsError.localizedDescription.lowercased()
+        if nsError.domain == NSCocoaErrorDomain && nsError.code == 4097 {
+            return ProxyHelperError.notEnabled
+        }
+        if description.contains("helper application") || description.contains("couldn’t communicate") || description.contains("couldn't communicate") {
+            return ProxyHelperError.notEnabled
+        }
+        return error
     }
 }
 
