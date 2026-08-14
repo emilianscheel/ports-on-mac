@@ -34,8 +34,29 @@ struct PortGroup {
     let entries: [PortEntry]
 
     var title: String {
-        let commands = Array(Set(entries.map(\.displayCommand))).sorted().prefix(3).joined(separator: ", ")
-        return ":\(port)  \(commands)"
+        ":\(port)  \(headlineNames.joined(separator: ", "))"
+    }
+
+    var subtitle: String? {
+        guard direction == .inbound else { return nil }
+        let usedProjectFolder = entries.contains { $0.usefulProjectFolderName != nil }
+        guard usedProjectFolder else { return nil }
+        return Array(Self.uniqueNames(entries.map(\.displayCommand)).prefix(3)).joined(separator: ", ")
+    }
+
+    private var headlineNames: [String] {
+        let names: [String]
+        if direction == .inbound {
+            names = entries.map { $0.usefulProjectFolderName ?? $0.displayCommand }
+        } else {
+            names = entries.map(\.displayCommand)
+        }
+        return Array(Self.uniqueNames(names).prefix(3))
+    }
+
+    private static func uniqueNames(_ names: [String]) -> [String] {
+        var seen = Set<String>()
+        return names.filter { seen.insert($0).inserted }
     }
 
     var hasSingleProcess: Bool {
@@ -134,12 +155,32 @@ struct PortEntry {
         return DomainName.suggested(fromName: command)
     }
 
+    var usefulProjectFolderName: String? {
+        guard let name = projectFolderName else { return nil }
+        guard !Self.genericProjectFolderNames.contains(name.lowercased()) else { return nil }
+        if let currentWorkingDirectory {
+            let parent = URL(fileURLWithPath: currentWorkingDirectory).deletingLastPathComponent().lastPathComponent
+            if parent.lowercased() == "users" {
+                return nil
+            }
+        }
+        return name
+    }
+
     private var projectFolderName: String? {
         guard let currentWorkingDirectory, !currentWorkingDirectory.isEmpty else { return nil }
         let name = URL(fileURLWithPath: currentWorkingDirectory).lastPathComponent
         guard !name.isEmpty, name != "/", name != ".", name != ".." else { return nil }
         return name
     }
+
+    private static let genericProjectFolderNames: Set<String> = [
+        "application support", "applications", "bin", "cellar", "contents",
+        "cores", "developer", "etc", "frameworks", "helpers", "homebrew",
+        "library", "macos", "opt", "plugins", "private", "public", "resources",
+        "sbin", "sharedsupport", "system", "tmp", "usr", "users", "var",
+        "volumes"
+    ]
 
     /// Inbound listeners that a person might open or kill: user apps, Docker, and
     /// non-Apple binaries. Apple daemons under /System and /usr/libexec are hidden.
