@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastSnapshot = MenuSnapshot.empty
     private var lastMenuFingerprint = ""
     private var isMenuOpen = false
+    private var hasRebuiltSinceOpen = false
+    private var forceMenuRebuild = false
     private var isScanning = false
     private var queuedRefresh = false
     private var refreshWaiters: [CheckedContinuation<MenuSnapshot, Never>] = []
@@ -68,18 +70,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         isMenuOpen = true
+        hasRebuiltSinceOpen = false
         scheduleRefresh()
     }
 
     func menuDidClose(_ menu: NSMenu) {
         isMenuOpen = false
+        hasRebuiltSinceOpen = false
+        forceMenuRebuild = false
     }
 
     private func startScanLoop() {
         scanLoopTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                await self.refreshSnapshot()
+                if !(self.isMenuOpen && self.hasRebuiltSinceOpen) {
+                    await self.refreshSnapshot()
+                }
                 try? await Task.sleep(for: .seconds(2))
             }
         }
@@ -127,9 +134,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             showOutbound: showOutboundPorts,
             needsLicense: LicenseStore.shared.needsLicenseMenu
         )
-        if isMenuOpen, fingerprint == lastMenuFingerprint {
-            syncProxy(with: snapshot)
-            return
+        let force = forceMenuRebuild
+        forceMenuRebuild = false
+
+        if isMenuOpen {
+            if hasRebuiltSinceOpen, !force {
+                syncProxy(with: snapshot)
+                return
+            }
+            hasRebuiltSinceOpen = true
+            if fingerprint == lastMenuFingerprint, !force {
+                syncProxy(with: snapshot)
+                return
+            }
         }
 
         lastMenuFingerprint = fingerprint
@@ -512,6 +529,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func refresh() {
+        forceMenuRebuild = true
         scheduleRefresh()
     }
 
@@ -579,6 +597,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleOutboundPorts() {
         showOutboundPorts.toggle()
         lastMenuFingerprint = ""
+        forceMenuRebuild = true
         rebuildMenu(from: lastSnapshot)
     }
 
