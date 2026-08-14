@@ -46,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        LocalProxyServer.shared.updateRoutes([:])
+        try? LocalProxyServer.shared.updateRoutes([:])
         ProxyHelperClient.shared.clearLiveDomainsBlocking()
     }
 
@@ -148,25 +148,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func syncProxy(with snapshot: MenuSnapshot) {
-        let routes = Dictionary(uniqueKeysWithValues: snapshot.services.map { ($0.binding.domain, $0.entry.port) })
-        LocalProxyServer.shared.updateRoutes(routes)
-
-        let domains = snapshot.services.map(\.binding.domain)
-        guard domains != lastSyncedDomains || !hasSyncedLiveDomains else { return }
-        lastSyncedDomains = domains
-        hasSyncedLiveDomains = true
-
-        Task { [domains] in
+        Task { @MainActor in
             do {
-                if !domains.isEmpty {
-                    try ProxyHelperClient.shared.prepareForAssignment()
-                }
-                if ProxyHelperClient.shared.status == .enabled {
-                    try await ProxyHelperClient.shared.syncLiveDomains(domains)
-                }
+                try await applyProxy(snapshot: snapshot, forceHelper: false)
             } catch {
                 NSLog("Ports on Mac could not sync local domains: \(error.localizedDescription)")
             }
+        }
+    }
+
+    private func applyProxy(snapshot: MenuSnapshot, forceHelper: Bool) async throws {
+        let routes = Dictionary(uniqueKeysWithValues: snapshot.services.map { ($0.binding.domain, $0.entry.port) })
+        let domains = snapshot.services.map(\.binding.domain)
+        try LocalProxyServer.shared.updateRoutes(routes)
+
+        guard forceHelper || domains != lastSyncedDomains || !hasSyncedLiveDomains else { return }
+        lastSyncedDomains = domains
+        hasSyncedLiveDomains = true
+
+        if !domains.isEmpty {
+            try ProxyHelperClient.shared.prepareForAssignment()
+        }
+        if ProxyHelperClient.shared.status == .enabled {
+            try await ProxyHelperClient.shared.syncLiveDomains(domains)
+        } else if !domains.isEmpty {
+            throw ProxyHelperError.notEnabled
         }
     }
 
@@ -353,15 +359,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        do {
-            try ProxyHelperClient.shared.prepareForAssignment()
-            try bindings.assign(domain: field.stringValue, to: context.entry)
-            lastSyncedDomains = []
-            rebuildMenu()
-        } catch ProxyHelperError.requiresApproval {
-            showHelperApprovalAlert()
-        } catch {
-            presentError(error, title: "Couldn’t assign domain")
+        Task { @MainActor in
+            do {
+                let domain = try DomainName.normalize(field.stringValue)
+                try ProxyHelperClient.shared.prepareForAssignment()
+                try bindings.assign(domain: field.stringValue, to: context.entry)
+                lastSyncedDomains = []
+                do {
+                    try await applyProxy(snapshot: makeSnapshot(), forceHelper: true)
+                } catch {
+                    try? bindings.unassign(domain: domain)
+                    lastSyncedDomains = []
+                    throw error
+                }
+                rebuildMenu()
+            } catch ProxyHelperError.requiresApproval {
+                showHelperApprovalAlert()
+            } catch {
+                presentError(error, title: "Couldn’t assign domain")
+                rebuildMenu()
+            }
         }
     }
 

@@ -196,10 +196,13 @@ private final class Port80Forwarder: @unchecked Sendable {
     private func forward(_ client: NWConnection) {
         client.start(queue: queue)
 
+        let tcp = NWProtocolTCP.Options()
+        tcp.connectionTimeout = 1
+        let parameters = NWParameters(tls: nil, tcp: tcp)
         let backend = NWConnection(
             host: "127.0.0.1",
             port: NWEndpoint.Port(rawValue: ProxyConstants.userProxyPort)!,
-            using: .tcp
+            using: parameters
         )
 
         backend.stateUpdateHandler = { [weak self] state in
@@ -207,7 +210,10 @@ private final class Port80Forwarder: @unchecked Sendable {
             case .ready:
                 self?.splice(client, backend)
                 self?.splice(backend, client)
-            case .failed, .cancelled:
+            case .failed:
+                self?.sendBadGateway(client)
+                backend.cancel()
+            case .cancelled:
                 client.cancel()
                 backend.cancel()
             default:
@@ -216,6 +222,22 @@ private final class Port80Forwarder: @unchecked Sendable {
         }
 
         backend.start(queue: queue)
+    }
+
+    private func sendBadGateway(_ connection: NWConnection) {
+        let body = Data("Upstream unavailable\n".utf8)
+        let response = Data(
+            """
+            HTTP/1.1 502 Bad Gateway\r
+            Connection: close\r
+            Content-Type: text/plain; charset=utf-8\r
+            Content-Length: \(body.count)\r
+            \r
+            """.utf8
+        ) + body
+        connection.send(content: response, isComplete: true, completion: .contentProcessed { _ in
+            connection.cancel()
+        })
     }
 
     private func splice(_ from: NWConnection, _ to: NWConnection) {
@@ -227,8 +249,8 @@ private final class Port80Forwarder: @unchecked Sendable {
             }
 
             if let data, !data.isEmpty {
-                to.send(content: data, completion: .contentProcessed { sendError in
-                    if sendError != nil {
+                to.send(content: data, isComplete: isComplete, completion: .contentProcessed { sendError in
+                    if sendError != nil || isComplete {
                         from.cancel()
                         to.cancel()
                         return
@@ -243,7 +265,10 @@ private final class Port80Forwarder: @unchecked Sendable {
                     from.cancel()
                     to.cancel()
                 })
+                return
             }
+
+            self?.splice(from, to)
         }
     }
 }

@@ -1,59 +1,106 @@
 import Foundation
 import Network
 
+enum LocalProxyError: LocalizedError {
+    case bindFailed(Error)
+    case timedOut
+
+    var errorDescription: String? {
+        switch self {
+        case .bindFailed(let error):
+            return "Could not start the local proxy: \(error.localizedDescription)"
+        case .timedOut:
+            return "Timed out binding the local proxy on port \(ProxyConstants.userProxyPort)."
+        }
+    }
+}
+
 final class LocalProxyServer: @unchecked Sendable {
     static let shared = LocalProxyServer()
 
     private let queue = DispatchQueue(label: "com.emilianscheel.ports-on-mac.proxy")
+    private let lock = NSLock()
     private var listener: NWListener?
     private var routes: [String: Int] = [:]
 
-    func updateRoutes(_ routes: [String: Int]) {
-        queue.async { [weak self] in
-            guard let self else { return }
-            self.routes = Dictionary(uniqueKeysWithValues: routes.map { ($0.key.lowercased(), $0.value) })
-            if self.routes.isEmpty {
+    func updateRoutes(_ routes: [String: Int]) throws {
+        let normalized = Dictionary(uniqueKeysWithValues: routes.map { ($0.key.lowercased(), $0.value) })
+        let shouldStart = queue.sync { () -> Bool in
+            self.routes = normalized
+            if normalized.isEmpty {
                 self.stopLocked()
-            } else {
-                self.startLocked()
+                return false
             }
+            return true
         }
+
+        guard shouldStart else { return }
+        try start()
     }
 
-    private func startLocked() {
-        if listener != nil { return }
+    private func start() throws {
+        lock.lock()
+        if listener != nil {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
 
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
         parameters.requiredInterfaceType = .loopback
-        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(
-            host: "127.0.0.1",
-            port: NWEndpoint.Port(rawValue: ProxyConstants.userProxyPort)!
-        )
+        let listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: ProxyConstants.userProxyPort)!)
 
-        do {
-            let listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: ProxyConstants.userProxyPort)!)
-            listener.newConnectionHandler = { [weak self] connection in
-                self?.handle(connection)
-            }
-            listener.stateUpdateHandler = { [weak self] state in
-                if case .failed(let error) = state {
-                    NSLog("Ports on Mac proxy failed: \(error.localizedDescription)")
-                    self?.queue.async {
-                        self?.stopLocked()
-                    }
+        let bindState = BindWait()
+        bindState.group.enter()
+        listener.stateUpdateHandler = { [weak self] state in
+            bindState.lock.lock()
+            defer { bindState.lock.unlock() }
+
+            switch state {
+            case .ready:
+                guard !bindState.finished else { return }
+                bindState.finished = true
+                bindState.group.leave()
+            case .failed(let error):
+                if !bindState.finished {
+                    bindState.finished = true
+                    bindState.error = error
+                    bindState.group.leave()
                 }
+                NSLog("Ports on Mac proxy failed: \(error.localizedDescription)")
+                self?.queue.async {
+                    self?.stopLocked()
+                }
+            default:
+                break
             }
-            listener.start(queue: queue)
-            self.listener = listener
-        } catch {
-            NSLog("Ports on Mac could not bind the local proxy: \(error.localizedDescription)")
         }
+        listener.newConnectionHandler = { [weak self] connection in
+            self?.handle(connection)
+        }
+        listener.start(queue: queue)
+
+        let waitResult = bindState.group.wait(timeout: .now() + 2)
+        if let startError = bindState.error {
+            listener.cancel()
+            throw LocalProxyError.bindFailed(startError)
+        }
+        if waitResult == .timedOut {
+            listener.cancel()
+            throw LocalProxyError.timedOut
+        }
+
+        lock.lock()
+        self.listener = listener
+        lock.unlock()
     }
 
     private func stopLocked() {
+        lock.lock()
         listener?.cancel()
         listener = nil
+        lock.unlock()
     }
 
     private func handle(_ connection: NWConnection) {
@@ -107,10 +154,13 @@ final class LocalProxyServer: @unchecked Sendable {
             return
         }
 
+        let tcp = NWProtocolTCP.Options()
+        tcp.connectionTimeout = 1
+        let parameters = NWParameters(tls: nil, tcp: tcp)
         let backend = NWConnection(
             host: "127.0.0.1",
             port: NWEndpoint.Port(rawValue: UInt16(port))!,
-            using: .tcp
+            using: parameters
         )
 
         backend.stateUpdateHandler = { [weak self] state in
@@ -146,13 +196,12 @@ final class LocalProxyServer: @unchecked Sendable {
             if let error {
                 to.cancel()
                 from.cancel()
-                NSLog("Ports on Mac proxy splice failed: \(error.localizedDescription)")
                 return
             }
 
             if let data, !data.isEmpty {
-                to.send(content: data, completion: .contentProcessed { sendError in
-                    if sendError != nil {
+                to.send(content: data, isComplete: isComplete, completion: .contentProcessed { sendError in
+                    if sendError != nil || isComplete {
                         from.cancel()
                         to.cancel()
                         return
@@ -167,7 +216,10 @@ final class LocalProxyServer: @unchecked Sendable {
                     to.cancel()
                     from.cancel()
                 })
+                return
             }
+
+            self?.splice(from, to)
         }
     }
 
@@ -249,4 +301,11 @@ final class LocalProxyServer: @unchecked Sendable {
 
         return Data((lines.joined(separator: "\r\n") + "\r\n\r\n").utf8)
     }
+}
+
+private final class BindWait: @unchecked Sendable {
+    let lock = NSLock()
+    let group = DispatchGroup()
+    var finished = false
+    var error: Error?
 }
