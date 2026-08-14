@@ -56,6 +56,29 @@ enum DomainName {
         return value
     }
 
+    static func suggested(fromName raw: String) -> String? {
+        let slug = slugify(raw)
+        guard !slug.isEmpty, slug != "localhost" else { return nil }
+        let hostname = "\(slug).com"
+        return isHostname(hostname) ? hostname : nil
+    }
+
+    private static func slugify(_ raw: String) -> String {
+        let mapped = raw.lowercased().map { character -> Character in
+            if character == "_" || character == " " {
+                return "-"
+            }
+            return character
+        }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
+        let filtered = String(mapped).unicodeScalars.filter { allowed.contains($0) }
+        var value = String(String.UnicodeScalarView(filtered))
+        while value.contains("--") {
+            value = value.replacingOccurrences(of: "--", with: "-")
+        }
+        return value.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
     private static func isHostname(_ value: String) -> Bool {
         let labels = value.split(separator: ".", omittingEmptySubsequences: false)
         guard labels.count >= 2 else { return false }

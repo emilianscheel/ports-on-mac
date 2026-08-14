@@ -523,9 +523,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.addButton(withTitle: "Cancel")
         alert.layout()
 
+        let suggested = LastDomainStore.shared.domain(for: context.entry)
+            ?? context.entry.suggestedDomain
+            ?? DomainName.placeholder
+
         let fieldWidth = max(220, alert.window.frame.width - 48)
         let field = NSTextField(frame: NSRect(x: 0, y: 29, width: fieldWidth, height: 21))
-        field.placeholderString = LastDomainStore.shared.domain(for: context.entry) ?? DomainName.placeholder
+        field.placeholderString = suggested
         field.stringValue = ""
         field.isBezeled = true
         field.bezelStyle = .roundedBezel
@@ -547,10 +551,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         Task { @MainActor in
             do {
-                let domain = try DomainName.normalize(field.stringValue)
+                let typed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                let rawDomain = typed.isEmpty ? suggested : field.stringValue
+                let domain = try DomainName.normalize(rawDomain)
                 let usesHTTPS = httpsCheckbox.state == .on
                 try ProxyHelperClient.shared.prepareForAssignment()
-                try bindings.assign(domain: field.stringValue, to: context.entry, usesHTTPS: usesHTTPS)
+                try bindings.assign(domain: rawDomain, to: context.entry, usesHTTPS: usesHTTPS)
                 lastSyncedDomains = []
                 lastSyncedHTTPS = false
                 let httpsWarning: String?

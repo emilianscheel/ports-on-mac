@@ -127,6 +127,20 @@ struct PortEntry {
         direction == .inbound && openURL != nil
     }
 
+    var suggestedDomain: String? {
+        if let folderName = projectFolderName, let domain = DomainName.suggested(fromName: folderName) {
+            return domain
+        }
+        return DomainName.suggested(fromName: command)
+    }
+
+    private var projectFolderName: String? {
+        guard let currentWorkingDirectory, !currentWorkingDirectory.isEmpty else { return nil }
+        let name = URL(fileURLWithPath: currentWorkingDirectory).lastPathComponent
+        guard !name.isEmpty, name != "/", name != ".", name != ".." else { return nil }
+        return name
+    }
+
     /// Inbound listeners that a person might open or kill: user apps, Docker, and
     /// non-Apple binaries. Apple daemons under /System and /usr/libexec are hidden.
     var isUsefulInbound: Bool {
