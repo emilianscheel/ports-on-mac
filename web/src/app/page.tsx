@@ -1,6 +1,8 @@
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 
+const downloadHref =
+    "https://github.com/emilianscheel/ports-on-mac/releases/latest/download/PortsOnMac.dmg";
 const checkoutHref = `/checkout?products=${process.env.NEXT_PUBLIC_POLAR_PRODUCT_ID}`;
 
 export default function Home() {
@@ -27,7 +29,7 @@ export default function Home() {
                         <Button
                             nativeButton={false}
                             variant="secondary"
-                            render={<a href="#download" />}
+                            render={<a href={downloadHref} />}
                             className="h-10 rounded-full bg-neutral-100 px-4 text-[15px] text-black transition-colors duration-150 ease-out hover:bg-neutral-200"
                         >
                             Download
@@ -35,7 +37,13 @@ export default function Home() {
                         <Button
                             nativeButton={false}
                             variant="ghost"
-                            render={<a href={checkoutHref} />}
+                            render={
+                                <a
+                                    href={checkoutHref}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                />
+                            }
                             className="h-10 rounded-full bg-transparent px-4 text-[15px] text-black transition-colors duration-150 ease-out hover:bg-neutral-100"
                         >
                             Buy
