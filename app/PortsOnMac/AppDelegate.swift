@@ -444,7 +444,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         NSApp.activate(ignoringOtherApps: true)
 
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 21))
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Assign Domain"
+        alert.informativeText = "This hostname will open locally and proxy to this process."
+        alert.addButton(withTitle: "Assign")
+        alert.addButton(withTitle: "Cancel")
+        alert.layout()
+
+        let fieldWidth = max(220, alert.window.frame.width - 48)
+        let field = NSTextField(frame: NSRect(x: 0, y: 29, width: fieldWidth, height: 21))
         field.placeholderString = LastDomainStore.shared.domain(for: context.entry) ?? DomainName.placeholder
         field.stringValue = ""
         field.isBezeled = true
@@ -454,19 +463,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let httpsCheckbox = NSButton(checkboxWithTitle: "Enable HTTPS", target: nil, action: nil)
         httpsCheckbox.state = .off
         httpsCheckbox.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        httpsCheckbox.frame = NSRect(x: 0, y: 0, width: fieldWidth, height: 21)
 
-        let accessory = NSStackView(views: [field, httpsCheckbox])
-        accessory.orientation = .vertical
-        accessory.alignment = .leading
-        accessory.spacing = 8
-        accessory.frame = NSRect(x: 0, y: 0, width: 220, height: 50)
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: fieldWidth, height: 50))
+        accessory.addSubview(field)
+        accessory.addSubview(httpsCheckbox)
 
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = "Assign Domain"
-        alert.informativeText = "This hostname will open locally and proxy to this process."
-        alert.addButton(withTitle: "Assign")
-        alert.addButton(withTitle: "Cancel")
         alert.accessoryView = accessory
         alert.window.initialFirstResponder = field
 

@@ -6,7 +6,6 @@ import X509
 enum LocalCertificateError: LocalizedError {
     case encoding
     case secKey
-    case keychain(OSStatus)
     case identity
 
     var errorDescription: String? {
@@ -15,8 +14,6 @@ enum LocalCertificateError: LocalizedError {
             return "Could not encode the local HTTPS certificate."
         case .secKey:
             return "Could not import the local HTTPS key."
-        case .keychain(let status):
-            return "Could not store the local HTTPS identity (error \(status))."
         case .identity:
             return "Could not create a local HTTPS identity."
         }
@@ -32,8 +29,6 @@ final class LocalCertificateAuthority: @unchecked Sendable {
     private var caCertificate: Certificate?
     private var cachedDomains: [String] = []
     private var cachedIdentity: SecIdentity?
-
-    private let keychainTag = Data("com.emilianscheel.ports-on-mac.https-leaf".utf8)
 
     init(directory: URL? = nil) {
         self.directory = directory ?? ProxyConstants.applicationSupportDirectory.appendingPathComponent("certs", isDirectory: true)
@@ -154,30 +149,7 @@ final class LocalCertificateAuthority: @unchecked Sendable {
 
         let secCertificate = try SecCertificate.makeWithCertificate(leaf)
         let secKey = try Self.secKey(from: leafKey)
-        return try makeIdentity(certificate: secCertificate, privateKey: secKey)
-    }
-
-    private func makeIdentity(certificate: SecCertificate, privateKey: SecKey) throws -> SecIdentity {
-        SecItemDelete([
-            kSecClass: kSecClassKey,
-            kSecAttrApplicationTag: keychainTag
-        ] as CFDictionary)
-
-        let addStatus = SecItemAdd([
-            kSecClass: kSecClassKey,
-            kSecAttrApplicationTag: keychainTag,
-            kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
-            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-            kSecValueRef: privateKey
-        ] as CFDictionary, nil)
-
-        guard addStatus == errSecSuccess || addStatus == errSecDuplicateItem else {
-            throw LocalCertificateError.keychain(addStatus)
-        }
-
-        var identity: SecIdentity?
-        let identityStatus = SecIdentityCreateWithCertificate(nil, certificate, &identity)
-        guard identityStatus == errSecSuccess, let identity else {
+        guard let identity = SecIdentityCreate(nil, secCertificate, secKey) else {
             throw LocalCertificateError.identity
         }
         return identity
