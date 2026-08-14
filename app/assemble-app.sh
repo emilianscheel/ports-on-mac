@@ -225,6 +225,10 @@ plutil -replace CFBundleVersion -string "$BUILD_VERSION" "$MAIN_INFO_PLIST"
 
 [[ "$(plutil -extract CFBundleIdentifier raw "$MAIN_INFO_PLIST")" == "$BUNDLE_ID" ]] \
   || die "The staged app has an unexpected bundle identifier."
+[[ -f "$STAGE_APP/Contents/MacOS/PortsOnMacForwarder" ]] \
+  || die "Built app is missing PortsOnMacForwarder."
+[[ -f "$STAGE_APP/Contents/Library/LaunchDaemons/com.emilianscheel.ports-on-mac.forwarder.plist" ]] \
+  || die "Built app is missing the forwarder LaunchDaemon plist."
 [[ -L "$SPARKLE_FRAMEWORK/Versions/Current" ]] \
   || die "Sparkle.framework's version symlink was not preserved."
 otool -L "$STAGE_APP/Contents/MacOS/$APP_NAME" \
@@ -252,6 +256,7 @@ codesign --verify --deep --strict --verbose=2 "$STAGE_APP"
 if [[ "$SIGNING_MODE" == "distribution" ]]; then
   for signed_item in \
     "$STAGE_APP/Contents/MacOS/$APP_NAME" \
+    "$STAGE_APP/Contents/MacOS/PortsOnMacForwarder" \
     "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate" \
     "$SPARKLE_FRAMEWORK/Versions/B/Updater.app" \
     "$SPARKLE_FRAMEWORK" \

@@ -65,6 +65,9 @@ struct PortEntry {
     let port: Int
     let direction: PortDirection
     let dockerContainers: [DockerContainer]
+    let executablePath: String?
+    let bundleIdentifier: String?
+    let currentWorkingDirectory: String?
 
     var displayCommand: String {
         if isDockerDesktopProxy {
@@ -120,7 +123,79 @@ struct PortEntry {
         return URL(string: "http://\(host):\(port)")
     }
 
+    var canAssignDomain: Bool {
+        direction == .inbound && openURL != nil
+    }
+
+    /// Inbound listeners that a person might open or kill: user apps, Docker, and
+    /// non-Apple binaries. Apple daemons under /System and /usr/libexec are hidden.
+    var isUsefulInbound: Bool {
+        guard direction == .inbound else { return true }
+
+        if !dockerContainers.isEmpty || isDockerDesktopProxy {
+            return true
+        }
+
+        if let bundleIdentifier {
+            return !bundleIdentifier.hasPrefix("com.apple.")
+        }
+
+        if let executablePath, Self.systemExecutableRoots.contains(where: { executablePath.hasPrefix($0) }) {
+            return false
+        }
+
+        return !Self.noisySystemCommands.contains(command)
+    }
+
+    private static let systemExecutableRoots = [
+        "/System/",
+        "/usr/libexec/",
+        "/usr/sbin/",
+        "/sbin/",
+        "/Library/Apple/"
+    ]
+
+    private static let noisySystemCommands: Set<String> = [
+        "AirPlayXP", "ControlCe", "ControlCenter", "WindowServ", "apsd", "bluetoothd",
+        "cfprefsd", "cloudd", "coreaudiod", "corespeechd", "distnoted", "homed",
+        "identitys", "imagent", "launchd", "lsd", "mDNSResp", "mDNSResponder",
+        "nearbyd", "nsurlsess", "rapportd", "remotepai", "replayd", "securityd",
+        "sharingd", "suggestd", "symptomsd", "syslogd", "timed", "trustd",
+        "UserEvent", "wifip2pd", "containermanagerd"
+    ]
+
+    func openURL(domain: String?) -> URL? {
+        if let domain, !domain.isEmpty {
+            return URL(string: "http://\(domain)")
+        }
+        return openURL
+    }
+
     func enriched(with containers: [DockerContainer]) -> PortEntry {
+        copy(
+            dockerContainers: containers,
+            executablePath: executablePath,
+            bundleIdentifier: bundleIdentifier,
+            currentWorkingDirectory: currentWorkingDirectory
+        )
+    }
+
+    func withProcessMetadata() -> PortEntry {
+        let executablePath = ProcessMetadata.executablePath(pid: pid)
+        return copy(
+            dockerContainers: dockerContainers,
+            executablePath: executablePath,
+            bundleIdentifier: ProcessMetadata.bundleIdentifier(executablePath: executablePath),
+            currentWorkingDirectory: ProcessMetadata.currentWorkingDirectory(pid: pid)
+        )
+    }
+
+    private func copy(
+        dockerContainers: [DockerContainer],
+        executablePath: String?,
+        bundleIdentifier: String?,
+        currentWorkingDirectory: String?
+    ) -> PortEntry {
         PortEntry(
             command: command,
             pid: pid,
@@ -133,7 +208,10 @@ struct PortEntry {
             state: state,
             port: port,
             direction: direction,
-            dockerContainers: containers
+            dockerContainers: dockerContainers,
+            executablePath: executablePath,
+            bundleIdentifier: bundleIdentifier,
+            currentWorkingDirectory: currentWorkingDirectory
         )
     }
 
@@ -189,7 +267,9 @@ final class PortScanner {
                 !(entry.protocolName == "TCP" && entry.state != "LISTEN" && listeningPorts.contains(entry.port))
             }
             .map { entry in
-                entry.enriched(with: dockerContainersByPort[entry.port] ?? [])
+                entry
+                    .withProcessMetadata()
+                    .enriched(with: dockerContainersByPort[entry.port] ?? [])
             }
 
         return PortDirection.allCases.map { direction in
@@ -263,7 +343,10 @@ final class PortScanner {
             state: state,
             port: port,
             direction: direction,
-            dockerContainers: []
+            dockerContainers: [],
+            executablePath: nil,
+            bundleIdentifier: nil,
+            currentWorkingDirectory: nil
         )
     }
 

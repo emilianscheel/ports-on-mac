@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.emilianscheel.ports-on-mac.forwarder</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/PortsOnMacForwarder</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<string>com.emilianscheel.ports-on-mac</string>
+	<key>MachServices</key>
+	<dict>
+		<key>com.emilianscheel.ports-on-mac.forwarder</key>
+		<true/>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+</dict>
+</plist>
