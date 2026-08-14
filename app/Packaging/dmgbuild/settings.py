@@ -21,7 +21,7 @@ show_sidebar = False
 background = None
 window_rect = ((200, 100000), (660, 400))
 default_view = "icon-view"
-show_icon_preview = True
+show_icon_preview = False
 include_icon_view_settings = True
 
 arrange_by = None

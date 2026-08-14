@@ -12,6 +12,15 @@ private func die(_ message: String) -> Never {
     exit(1)
 }
 
+private func applyFinderIcon(to tiffURL: URL) {
+    guard let image = NSImage(contentsOf: tiffURL) else {
+        die("Could not read the DMG arrow TIFF.")
+    }
+    guard NSWorkspace.shared.setIcon(image, forFile: tiffURL.path, options: []) else {
+        die("Could not apply the DMG arrow as a Finder icon.")
+    }
+}
+
 private func render(scale: Int, to outputURL: URL) throws {
     guard let bitmap = NSBitmapImageRep(
         bitmapDataPlanes: nil,
@@ -41,7 +50,7 @@ private func render(scale: Int, to outputURL: URL) throws {
 
     let sizeConfiguration = NSImage.SymbolConfiguration(
         pointSize: arrowPointSize,
-        weight: .medium
+        weight: .regular
     )
     let colorConfiguration = NSImage.SymbolConfiguration(
         paletteColors: [arrowColor]
@@ -68,8 +77,13 @@ private func render(scale: Int, to outputURL: URL) throws {
     try png.write(to: outputURL, options: .atomic)
 }
 
+if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--set-icon" {
+    applyFinderIcon(to: URL(fileURLWithPath: CommandLine.arguments[2]))
+    exit(0)
+}
+
 guard CommandLine.arguments.count == 3 else {
-    die("Usage: make-dmg-arrow.swift <1x-output.png> <2x-output.png>")
+    die("Usage: make-dmg-arrow.swift <1x-output.png> <2x-output.png>\n       make-dmg-arrow.swift --set-icon <arrow.tiff>")
 }
 
 do {

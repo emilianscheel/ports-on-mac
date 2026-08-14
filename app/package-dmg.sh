@@ -80,6 +80,9 @@ SWIFT_MODULECACHE_PATH="$MODULE_CACHE_DIR" \
   swift "$PROJECT_DIR/Packaging/make-dmg-arrow.swift" "$ARROW_1X" "$ARROW_2X"
 tiffutil -cathidpicheck "$ARROW_1X" "$ARROW_2X" \
   -out "$ARROW_TIFF" >/dev/null
+CLANG_MODULE_CACHE_PATH="$MODULE_CACHE_DIR" \
+SWIFT_MODULECACHE_PATH="$MODULE_CACHE_DIR" \
+  swift "$PROJECT_DIR/Packaging/make-dmg-arrow.swift" --set-icon "$ARROW_TIFF"
 
 uv run \
   --project "$DMGBUILD_PROJECT_DIR" \

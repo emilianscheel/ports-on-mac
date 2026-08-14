@@ -25,8 +25,8 @@ with DSStore.open(sys.argv[1], "r") as store:
         fail("the icon size is not 112 points")
     if icon_view.get("textSize") != 14.0:
         fail("the label size is not 14 points")
-    if not icon_view.get("showIconPreview"):
-        fail("icon previews are disabled")
+    if icon_view.get("showIconPreview"):
+        fail("icon previews are enabled")
 
     for item, expected_location in EXPECTED_LOCATIONS.items():
         if store[item]["Iloc"] != expected_location:
