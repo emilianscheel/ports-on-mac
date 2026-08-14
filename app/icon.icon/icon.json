@@ -1,17 +1,17 @@
 {
   "fill" : {
     "linear-gradient" : [
-      "display-p3:0.65606,0.66905,0.66905,1.00000",
-      "display-p3:0.78659,0.79430,0.79430,1.00000"
+      "srgb:1.00000,1.00000,1.00000,1.00000",
+      "srgb:1.00000,1.00000,1.00000,1.00000"
     ],
     "orientation" : {
       "start" : {
         "x" : 0.5,
-        "y" : 1
+        "y" : 0
       },
       "stop" : {
         "x" : 0.5,
-        "y" : 0.3
+        "y" : 0.7
       }
     }
   },
@@ -19,16 +19,12 @@
     {
       "layers" : [
         {
-          "fill-specializations" : [
-            {
-              "appearance" : "dark",
-              "value" : {
-                "solid" : "srgb:1.00000,1.00000,1.00000,1.00000"
-              }
-            }
-          ],
-          "image-name" : "cable.connector.png",
-          "name" : "cable.connector"
+          "fill" : {
+            "solid" : "srgb:0.00000,0.00000,0.00000,0.46047"
+          },
+          "glass" : true,
+          "image-name" : "cable.connector.video.png",
+          "name" : "cable.connector.video"
         }
       ],
       "shadow" : {
