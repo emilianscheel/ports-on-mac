@@ -319,7 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let processMenu = NSMenu()
         let domain = binding?.domain
         let usesHTTPS = binding?.usesHTTPS ?? false
-        let context = PortMenuContext(entry: entry, domain: domain)
+        let context = PortMenuContext(entry: entry, domain: domain, usesHTTPS: usesHTTPS)
 
         for detail in entry.details {
             let detailItem = NSMenuItem(title: detail, action: nil, keyEquivalent: "")
@@ -340,9 +340,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if domain != nil {
                 processMenu.addItem(.separator())
 
+                let httpsTitle = usesHTTPS ? "Disable HTTPS" : "Enable HTTPS"
+                let httpsItem = NSMenuItem(title: httpsTitle, action: #selector(toggleHTTPS(_:)), keyEquivalent: "")
+                httpsItem.target = self
+                httpsItem.image = NSImage(
+                    systemSymbolName: usesHTTPS ? "checkmark.circle.fill" : "checkmark.circle",
+                    accessibilityDescription: httpsTitle
+                )
+                httpsItem.representedObject = context
+                processMenu.addItem(httpsItem)
+
                 let unassignItem = NSMenuItem(title: "Unassign Domain", action: #selector(unassignDomain(_:)), keyEquivalent: "")
                 unassignItem.target = self
-                unassignItem.image = NSImage(systemSymbolName: "network.slash", accessibilityDescription: "Unassign Domain")
+                unassignItem.image = NSImage(systemSymbolName: "minus", accessibilityDescription: "Unassign Domain")
                 unassignItem.representedObject = context
                 processMenu.addItem(unassignItem)
             } else if entry.canAssignDomain {
@@ -350,7 +360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
                 let assignItem = NSMenuItem(title: "Assign Domain", action: #selector(assignDomain(_:)), keyEquivalent: "")
                 assignItem.target = self
-                assignItem.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Assign Domain")
+                assignItem.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Assign Domain")
                 assignItem.representedObject = context
                 processMenu.addItem(assignItem)
             }
@@ -501,6 +511,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc private func toggleHTTPS(_ sender: NSMenuItem) {
+        guard let context = sender.representedObject as? PortMenuContext,
+              let domain = context.domain else { return }
+
+        let enable = !context.usesHTTPS
+        Task { @MainActor in
+            do {
+                try ProxyHelperClient.shared.prepareForAssignment()
+                try bindings.setUsesHTTPS(enable, domain: domain)
+                lastSyncedDomains = []
+                lastSyncedHTTPS = false
+                do {
+                    try await applyProxy(snapshot: makeSnapshot(), forceHelper: true)
+                } catch {
+                    try? bindings.setUsesHTTPS(!enable, domain: domain)
+                    lastSyncedDomains = []
+                    lastSyncedHTTPS = false
+                    throw error
+                }
+                rebuildMenu()
+            } catch ProxyHelperError.requiresApproval {
+                showHelperApprovalAlert()
+            } catch {
+                presentError(error, title: enable ? "Couldn’t enable HTTPS" : "Couldn’t disable HTTPS")
+                rebuildMenu()
+            }
+        }
+    }
+
     @objc private func unassignDomain(_ sender: NSMenuItem) {
         guard let context = sender.representedObject as? PortMenuContext else { return }
 
@@ -570,9 +609,11 @@ private struct MenuSnapshot {
 private final class PortMenuContext: NSObject {
     let entry: PortEntry
     let domain: String?
+    let usesHTTPS: Bool
 
-    init(entry: PortEntry, domain: String?) {
+    init(entry: PortEntry, domain: String?, usesHTTPS: Bool = false) {
         self.entry = entry
         self.domain = domain
+        self.usesHTTPS = usesHTTPS
     }
 }

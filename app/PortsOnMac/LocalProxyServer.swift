@@ -27,6 +27,7 @@ final class LocalProxyServer: @unchecked Sendable {
     private var httpListener: NWListener?
     private var tlsListener: NWListener?
     private var routes: [String: Int] = [:]
+    private var httpsHosts: Set<String> = []
     private var lastHTTPSDomains: [String] = []
 
     func updateRoutes(_ routes: [String: Int], httpsDomains: [String] = []) throws {
@@ -34,6 +35,7 @@ final class LocalProxyServer: @unchecked Sendable {
         let https = Array(Set(httpsDomains.map { $0.lowercased() })).sorted()
         let shouldStart = queue.sync { () -> Bool in
             self.routes = normalized
+            self.httpsHosts = Set(https)
             if normalized.isEmpty {
                 self.stopLocked()
                 self.lastHTTPSDomains = []
@@ -228,6 +230,12 @@ final class LocalProxyServer: @unchecked Sendable {
             return
         }
 
+        if proto == "http", httpsHosts.contains(host) {
+            let path = Self.requestTarget(fromHeaderBlock: headerBlock)
+            sendRedirect(client, location: "https://\(host)\(path)")
+            return
+        }
+
         let tcp = NWProtocolTCP.Options()
         tcp.connectionTimeout = 1
         let parameters = NWParameters(tls: nil, tcp: tcp)
@@ -299,6 +307,24 @@ final class LocalProxyServer: @unchecked Sendable {
         }
     }
 
+    private func sendRedirect(_ connection: NWConnection, location: String) {
+        let body = Data("Redirecting to \(location)\n".utf8)
+        let response = Data(
+            """
+            HTTP/1.1 301 Moved Permanently\r
+            Location: \(location)\r
+            Connection: close\r
+            Content-Type: text/plain; charset=utf-8\r
+            Content-Length: \(body.count)\r
+            \r
+            """.utf8
+        ) + body
+
+        connection.send(content: response, isComplete: true, completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+
     private func sendError(_ connection: NWConnection, status: Int, message: String) {
         let reason = status == 400 ? "Bad Request" : "Bad Gateway"
         let body = Data(message.utf8)
@@ -337,6 +363,28 @@ final class LocalProxyServer: @unchecked Sendable {
         }
 
         return nil
+    }
+
+    static func requestTarget(fromHeaderBlock data: Data) -> String {
+        guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+            return "/"
+        }
+
+        let firstLine = (text.split(whereSeparator: \.isNewline).first.map(String.init) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = firstLine.split(separator: " ", omittingEmptySubsequences: true)
+        guard parts.count >= 2 else { return "/" }
+
+        var target = String(parts[1])
+        if target.hasPrefix("http://") || target.hasPrefix("https://"), let url = URL(string: target) {
+            var path = url.path.isEmpty ? "/" : url.path
+            if let query = url.query, !query.isEmpty {
+                path += "?\(query)"
+            }
+            return path
+        }
+
+        return target.isEmpty ? "/" : target
     }
 
     static func rewrittenHeaders(_ headerBlock: Data, host: String, proto: String = "http") -> Data {

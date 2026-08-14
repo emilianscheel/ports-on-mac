@@ -242,6 +242,17 @@ final class ServiceBindingStore: @unchecked Sendable {
         }
     }
 
+    func setUsesHTTPS(_ enabled: Bool, domain: String) throws {
+        let normalized = domain.lowercased()
+        try queue.sync {
+            guard let index = bindings.firstIndex(where: { $0.domain.lowercased() == normalized }) else {
+                return
+            }
+            bindings[index].usesHTTPS = enabled
+            try persistLocked()
+        }
+    }
+
     func unassign(entry: PortEntry) throws {
         try queue.sync {
             bindings.removeAll { $0.matchRank(against: entry) != nil }

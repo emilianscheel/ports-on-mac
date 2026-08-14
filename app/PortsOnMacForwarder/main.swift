@@ -23,26 +23,46 @@ private final class ForwarderListenerDelegate: NSObject, NSXPCListenerDelegate {
 
 private enum ForwarderSecurity {
     static func isTrustedCaller(_ connection: NSXPCConnection) -> Bool {
-        let attributes = [kSecGuestAttributePid: connection.processIdentifier] as CFDictionary
+        let pid = connection.processIdentifier
+        let attributes = [kSecGuestAttributePid: pid] as CFDictionary
 
         var secCode: SecCode?
         guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &secCode) == errSecSuccess, let secCode else {
+            NSLog("PortsOnMacForwarder rejected caller pid \(pid): could not copy code")
             return false
         }
 
         var secStatic: SecStaticCode?
         guard SecCodeCopyStaticCode(secCode, [], &secStatic) == errSecSuccess, let secStatic else {
+            NSLog("PortsOnMacForwarder rejected caller pid \(pid): could not copy static code")
             return false
         }
 
         var info: CFDictionary?
         guard SecCodeCopySigningInformation(secStatic, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
-              let info = info as? [String: Any],
-              let identifier = info[kSecCodeInfoIdentifier as String] as? String else {
+              let info = info as? [String: Any] else {
+            NSLog("PortsOnMacForwarder rejected caller pid \(pid): could not copy signing information")
             return false
         }
 
-        return identifier == ProxyConstants.appBundleIdentifier
+        if let identifier = info[kSecCodeInfoIdentifier as String] as? String, !identifier.isEmpty {
+            if identifier == ProxyConstants.appBundleIdentifier {
+                return true
+            }
+            NSLog("PortsOnMacForwarder rejected caller pid \(pid) identifier=\(identifier)")
+            return false
+        }
+
+        if let plist = info[kSecCodeInfoPList as String] as? [String: Any] {
+            let bundleID = plist[kCFBundleIdentifierKey as String] as? String
+                ?? plist["CFBundleIdentifier"] as? String
+            if bundleID == ProxyConstants.appBundleIdentifier {
+                return true
+            }
+        }
+
+        NSLog("PortsOnMacForwarder rejected caller pid \(pid) identifier=nil")
+        return false
     }
 }
 

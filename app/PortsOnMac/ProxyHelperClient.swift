@@ -4,6 +4,7 @@ import ServiceManagement
 enum ProxyHelperError: LocalizedError {
     case requiresApproval
     case notEnabled
+    case unreachable
     case remote(String)
 
     var errorDescription: String? {
@@ -12,6 +13,8 @@ enum ProxyHelperError: LocalizedError {
             return "Enable the Ports on Mac helper in System Settings → General → Login Items & Extensions so local domains can use port 80 and HTTPS on port 443."
         case .notEnabled:
             return "The Ports on Mac helper is not enabled."
+        case .unreachable:
+            return "The Ports on Mac helper is installed but isn’t responding. If it appears in Login Items, toggle it off and on, or reinstall the app."
         case .remote(let message):
             return message
         }
@@ -30,22 +33,19 @@ final class ProxyHelperClient: @unchecked Sendable {
     }
 
     func prepareForAssignment() throws {
-        do {
-            try daemon.register()
-        } catch {
-            if daemon.status != .enabled {
-                switch daemon.status {
-                case .requiresApproval:
-                    throw ProxyHelperError.requiresApproval
-                default:
-                    throw ProxyHelperError.notEnabled
-                }
-            }
-        }
-
         switch daemon.status {
         case .enabled:
             return
+        case .notRegistered, .notFound:
+            try daemon.register()
+            switch daemon.status {
+            case .enabled:
+                return
+            case .requiresApproval:
+                throw ProxyHelperError.requiresApproval
+            default:
+                throw ProxyHelperError.notEnabled
+            }
         case .requiresApproval:
             throw ProxyHelperError.requiresApproval
         default:
@@ -54,13 +54,13 @@ final class ProxyHelperClient: @unchecked Sendable {
     }
 
     func syncLiveDomains(_ domains: [String], enableHTTPS: Bool) async throws {
-        try await retry {
+        try await performHelperCall {
             try await self.setLiveDomains(domains, enableHTTPS: enableHTTPS)
         }
     }
 
     func installTrustedRoot(_ certificateDER: Data) async throws {
-        try await retry {
+        try await performHelperCall {
             try await self.installTrustedRootOnce(certificateDER)
         }
     }
@@ -76,18 +76,59 @@ final class ProxyHelperClient: @unchecked Sendable {
         _ = semaphore.wait(timeout: .now() + 2)
     }
 
-    private func retry(_ work: @escaping () async throws -> Void) async throws {
-        var lastError: Error = ProxyHelperError.notEnabled
+    private func performHelperCall(_ work: @escaping () async throws -> Void) async throws {
+        var repaired = false
+        var lastError: Error = ProxyHelperError.unreachable
+
         for attempt in 0..<8 {
             do {
                 try await work()
                 return
+            } catch let error as ProxyHelperError {
+                switch error {
+                case .requiresApproval, .notEnabled:
+                    throw error
+                default:
+                    lastError = error
+                }
             } catch {
-                lastError = error
-                try await Task.sleep(for: .milliseconds(200 * (attempt + 1)))
+                lastError = Self.mappedXPCError(error)
             }
+
+            if !repaired, daemon.status == .enabled {
+                repaired = true
+                do {
+                    try repairHelper()
+                } catch let error as ProxyHelperError {
+                    switch error {
+                    case .requiresApproval, .notEnabled:
+                        throw error
+                    default:
+                        break
+                    }
+                } catch {
+                    lastError = error
+                }
+                try await Task.sleep(for: .seconds(1))
+                continue
+            }
+
+            try await Task.sleep(for: .milliseconds(200 * (attempt + 1)))
         }
+
         throw lastError
+    }
+
+    private func repairHelper() throws {
+        try daemon.register()
+        switch daemon.status {
+        case .enabled:
+            return
+        case .requiresApproval:
+            throw ProxyHelperError.requiresApproval
+        default:
+            throw ProxyHelperError.notEnabled
+        }
     }
 
     private func setLiveDomains(_ domains: [String], enableHTTPS: Bool) async throws {
@@ -135,10 +176,10 @@ final class ProxyHelperClient: @unchecked Sendable {
 
             let resumeOnce = ResumeOnce(continuation)
             connection.invalidationHandler = {
-                resumeOnce.resume(throwing: ProxyHelperError.notEnabled)
+                resumeOnce.resume(throwing: ProxyHelperError.unreachable)
             }
             connection.interruptionHandler = {
-                resumeOnce.resume(throwing: ProxyHelperError.notEnabled)
+                resumeOnce.resume(throwing: ProxyHelperError.unreachable)
             }
 
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
@@ -147,7 +188,7 @@ final class ProxyHelperClient: @unchecked Sendable {
             }
 
             guard let helper = proxy as? ProxyHelperXPCProtocol else {
-                resumeOnce.resume(throwing: ProxyHelperError.notEnabled)
+                resumeOnce.resume(throwing: ProxyHelperError.unreachable)
                 connection.invalidate()
                 return
             }
@@ -157,15 +198,10 @@ final class ProxyHelperClient: @unchecked Sendable {
     }
 
     private static func mappedXPCError(_ error: Error) -> Error {
-        let nsError = error as NSError
-        let description = nsError.localizedDescription.lowercased()
-        if nsError.domain == NSCocoaErrorDomain && nsError.code == 4097 {
-            return ProxyHelperError.notEnabled
+        if error is ProxyHelperError {
+            return error
         }
-        if description.contains("helper application") || description.contains("couldn’t communicate") || description.contains("couldn't communicate") {
-            return ProxyHelperError.notEnabled
-        }
-        return error
+        return ProxyHelperError.unreachable
     }
 }
 
