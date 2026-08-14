@@ -30,8 +30,23 @@ Set the same keys on Vercel for `https://ports-on-mac.vercel.app` or checkout an
 | Product (Ports on Mac, $10 one-time) | `66c8ee2f-990e-4d0d-b2f6-97e1ec5d4618` |
 | Webhook endpoint | `8031d766-b947-4c9d-9658-c54a6252d56e` |
 | Webhook URL | `https://ports-on-mac.vercel.app/api/webhook/polar` |
+| Organization id (public, used by the Mac app) | `865b2f78-d4cd-4364-8e78-c1c92a07288f` |
 
 Existing product was reused; no new product was created.
+
+## License Keys benefit (required for the Mac app)
+
+The current organization access token does not include `benefits:write`, so this must be created in the [Polar dashboard](https://polar.sh/dashboard/emilian-scheel):
+
+1. Benefits → New Benefit → **License Keys**
+2. Description: `Ports on Mac license`
+3. Prefix: `PORTS`
+4. No automatic expiry
+5. Activation limit: **3**
+6. Enable customer deactivate in the portal
+7. Attach the benefit to the **Ports on Mac** product
+
+Polar emails the key after purchase. The Mac app activates it via Polar’s public customer-portal API (no access token in the app).
 
 ## Verify before merging
 

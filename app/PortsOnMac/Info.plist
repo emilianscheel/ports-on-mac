@@ -29,5 +29,9 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>PolarOrganizationID</key>
+	<string>865b2f78-d4cd-4364-8e78-c1c92a07288f</string>
+	<key>PolarCheckoutURL</key>
+	<string>https://ports-on-mac.vercel.app/checkout?products=66c8ee2f-990e-4d0d-b2f6-97e1ec5d4618</string>
 </dict>
 </plist>

@@ -44,7 +44,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.delegate = self
         statusItem.menu = menu
+        LicenseStore.shared.ensureTrialStarted()
         rebuildMenu()
+        Task {
+            await LicenseStore.shared.refreshValidation()
+            rebuildMenu()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -109,6 +114,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateItem.isEnabled = updater?.canCheckForUpdates ?? true
         menu.addItem(updateItem)
 
+        if LicenseStore.shared.needsLicenseMenu {
+            let buyItem = NSMenuItem(
+                title: "Buy License Key",
+                action: #selector(buyLicenseKey),
+                keyEquivalent: ""
+            )
+            buyItem.target = self
+            buyItem.image = NSImage(systemSymbolName: "cart", accessibilityDescription: "Buy License Key")
+            menu.addItem(buyItem)
+
+            let activateItem = NSMenuItem(
+                title: "Activate License Key",
+                action: #selector(activateLicenseKey),
+                keyEquivalent: ""
+            )
+            activateItem.target = self
+            activateItem.image = NSImage(systemSymbolName: "key", accessibilityDescription: "Activate License Key")
+            menu.addItem(activateItem)
+        }
+
         let aboutItem = NSMenuItem(title: "About Ports on Mac", action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
         aboutItem.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "About Ports on Mac")
@@ -155,6 +180,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func syncProxy(with snapshot: MenuSnapshot) {
+        guard LicenseStore.shared.hasDomainAccess else {
+            tearDownProxy()
+            return
+        }
+
         Task { @MainActor in
             do {
                 try await applyProxy(snapshot: snapshot, forceHelper: false)
@@ -162,6 +192,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 NSLog("Ports on Mac could not sync local domains: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func tearDownProxy() {
+        try? LocalProxyServer.shared.updateRoutes([:], httpsDomains: [])
+        ProxyHelperClient.shared.clearLiveDomainsBlocking()
+        lastSyncedDomains = []
+        lastSyncedHTTPS = false
+        hasSyncedLiveDomains = false
     }
 
     private func applyProxy(snapshot: MenuSnapshot, forceHelper: Bool) async throws {
@@ -298,22 +336,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openItem.isEnabled = entry.openURL(domain: domain, usesHTTPS: usesHTTPS) != nil
         processMenu.addItem(openItem)
 
-        if domain != nil {
-            processMenu.addItem(.separator())
+        if LicenseStore.shared.hasDomainAccess {
+            if domain != nil {
+                processMenu.addItem(.separator())
 
-            let unassignItem = NSMenuItem(title: "Unassign Domain", action: #selector(unassignDomain(_:)), keyEquivalent: "")
-            unassignItem.target = self
-            unassignItem.image = NSImage(systemSymbolName: "network.slash", accessibilityDescription: "Unassign Domain")
-            unassignItem.representedObject = context
-            processMenu.addItem(unassignItem)
-        } else if entry.canAssignDomain {
-            processMenu.addItem(.separator())
+                let unassignItem = NSMenuItem(title: "Unassign Domain", action: #selector(unassignDomain(_:)), keyEquivalent: "")
+                unassignItem.target = self
+                unassignItem.image = NSImage(systemSymbolName: "network.slash", accessibilityDescription: "Unassign Domain")
+                unassignItem.representedObject = context
+                processMenu.addItem(unassignItem)
+            } else if entry.canAssignDomain {
+                processMenu.addItem(.separator())
 
-            let assignItem = NSMenuItem(title: "Assign Domain", action: #selector(assignDomain(_:)), keyEquivalent: "")
-            assignItem.target = self
-            assignItem.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Assign Domain")
-            assignItem.representedObject = context
-            processMenu.addItem(assignItem)
+                let assignItem = NSMenuItem(title: "Assign Domain", action: #selector(assignDomain(_:)), keyEquivalent: "")
+                assignItem.target = self
+                assignItem.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Assign Domain")
+                assignItem.representedObject = context
+                processMenu.addItem(assignItem)
+            }
         }
 
         processMenu.addItem(.separator())
@@ -351,6 +391,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.runModal()
     }
 
+    @objc private func buyLicenseKey() {
+        let urlString = Bundle.main.object(forInfoDictionaryKey: "PolarCheckoutURL") as? String
+            ?? "https://ports-on-mac.vercel.app/checkout?products=66c8ee2f-990e-4d0d-b2f6-97e1ec5d4618"
+        guard let url = URL(string: urlString) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func activateLicenseKey() {
+        NSApp.activate(ignoringOtherApps: true)
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 21))
+        field.placeholderString = "PORTS-…"
+        field.stringValue = ""
+        field.isBezeled = true
+        field.bezelStyle = .roundedBezel
+        field.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Activate License Key"
+        alert.informativeText = "Paste the key Polar emailed after your purchase. One key works on up to 3 Macs."
+        alert.addButton(withTitle: "Activate")
+        alert.addButton(withTitle: "Cancel")
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        Task { @MainActor in
+            do {
+                try await LicenseStore.shared.activate(key: field.stringValue)
+                rebuildMenu()
+            } catch {
+                presentError(error, title: "Couldn’t activate license")
+            }
+        }
+    }
+
     @objc private func toggleOutboundPorts() {
         showOutboundPorts.toggle()
         rebuildMenu()
@@ -366,7 +444,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         NSApp.activate(ignoringOtherApps: true)
 
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 21))
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 21))
         field.placeholderString = LastDomainStore.shared.domain(for: context.entry) ?? DomainName.placeholder
         field.stringValue = ""
         field.isBezeled = true
@@ -381,15 +459,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         accessory.orientation = .vertical
         accessory.alignment = .leading
         accessory.spacing = 8
-        accessory.translatesAutoresizingMaskIntoConstraints = false
-        field.widthAnchor.constraint(equalToConstant: 260).isActive = true
-        accessory.layoutSubtreeIfNeeded()
-        accessory.frame = NSRect(x: 0, y: 0, width: 260, height: accessory.fittingSize.height)
+        accessory.frame = NSRect(x: 0, y: 0, width: 220, height: 50)
 
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = "Assign Domain"
-        alert.informativeText = "This hostname will open locally and proxy to this process. HTTPS uses a local certificate trusted on this Mac."
+        alert.informativeText = "This hostname will open locally and proxy to this process."
         alert.addButton(withTitle: "Assign")
         alert.addButton(withTitle: "Cancel")
         alert.accessoryView = accessory

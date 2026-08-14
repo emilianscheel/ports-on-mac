@@ -24,6 +24,8 @@
 		1A000002000000000000003E /* FaviconStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000000027 /* FaviconStore.swift */; };
 		1A000002000000000000003F /* AboutWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000000028 /* AboutWindow.swift */; };
 		1A0000020000000000000043 /* LastDomainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000000029 /* LastDomainStore.swift */; };
+		1A0000020000000000000047 /* LicenseStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000002000000000000002B /* LicenseStore.swift */; };
+		1A0000020000000000000048 /* PolarLicenseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000002000000000000002C /* PolarLicenseClient.swift */; };
 		1A0000020000000000000044 /* LocalCertificateAuthority.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000002000000000000002A /* LocalCertificateAuthority.swift */; };
 		1A0000020000000000000045 /* X509 in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000010000000000000073 /* X509 */; };
 		1A0000020000000000000046 /* Crypto in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000010000000000000075 /* Crypto */; };
@@ -94,6 +96,8 @@
 		1A0000020000000000000027 /* FaviconStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaviconStore.swift; sourceTree = "<group>"; };
 		1A0000020000000000000028 /* AboutWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutWindow.swift; sourceTree = "<group>"; };
 		1A0000020000000000000029 /* LastDomainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LastDomainStore.swift; sourceTree = "<group>"; };
+		1A000002000000000000002B /* LicenseStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LicenseStore.swift; sourceTree = "<group>"; };
+		1A000002000000000000002C /* PolarLicenseClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolarLicenseClient.swift; sourceTree = "<group>"; };
 		1A000002000000000000002A /* LocalCertificateAuthority.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCertificateAuthority.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -139,6 +143,8 @@
 				1A0000020000000000000027 /* FaviconStore.swift */,
 				1A000002000000000000001A /* ServiceBindingStore.swift */,
 				1A0000020000000000000029 /* LastDomainStore.swift */,
+				1A000002000000000000002B /* LicenseStore.swift */,
+				1A000002000000000000002C /* PolarLicenseClient.swift */,
 				1A000002000000000000001B /* LocalProxyServer.swift */,
 				1A000002000000000000002A /* LocalCertificateAuthority.swift */,
 				1A000002000000000000001C /* ProxyHelperClient.swift */,
@@ -293,6 +299,8 @@
 				1A000002000000000000003E /* FaviconStore.swift in Sources */,
 				1A0000020000000000000032 /* ServiceBindingStore.swift in Sources */,
 				1A0000020000000000000043 /* LastDomainStore.swift in Sources */,
+				1A0000020000000000000047 /* LicenseStore.swift in Sources */,
+				1A0000020000000000000048 /* PolarLicenseClient.swift in Sources */,
 				1A0000020000000000000033 /* LocalProxyServer.swift in Sources */,
 				1A0000020000000000000044 /* LocalCertificateAuthority.swift in Sources */,
 				1A0000020000000000000034 /* ProxyHelperClient.swift in Sources */,
