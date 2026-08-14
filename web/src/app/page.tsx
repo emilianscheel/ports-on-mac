@@ -3,8 +3,8 @@ import { Button } from "@/components/ui/button"
 
 export default function Home() {
   return (
-    <main className="relative flex min-h-svh flex-col items-center bg-white px-6">
-      <div className="flex flex-1 flex-col items-center justify-center">
+    <main className="grid min-h-svh grid-cols-1 md:grid-cols-2">
+      <section className="relative flex flex-col items-center justify-center bg-white px-6">
         <div className="flex flex-col items-center">
           <Image
             src="/icon.png"
@@ -24,25 +24,30 @@ export default function Home() {
           <div className="mt-10 flex items-center gap-2.5">
             <Button
               nativeButton={false}
+              variant="secondary"
               render={<a href="#download" />}
-              className="h-10 rounded-full px-6 text-[15px]"
+              className="h-10 rounded-full bg-neutral-100 px-4 text-[15px] text-black hover:bg-neutral-200"
             >
               Download
             </Button>
             <Button
               nativeButton={false}
-              variant="outline"
+              variant="ghost"
               render={<a href="#buy" />}
-              className="h-10 rounded-full border-black px-6 text-[15px] text-black hover:bg-neutral-50"
+              className="h-10 rounded-full bg-transparent px-4 text-[15px] text-black hover:bg-neutral-100"
             >
               Buy
             </Button>
           </div>
         </div>
-      </div>
-      <p className="absolute inset-x-0 bottom-8 text-center text-sm text-neutral-400">
-        7 trial days · $10 one time
-      </p>
+        <p className="absolute inset-x-0 bottom-8 text-center text-sm text-neutral-400">
+          7 trial days · $10 one time
+        </p>
+      </section>
+      <aside
+        className="hidden min-h-svh bg-neutral-100 md:block"
+        aria-hidden="true"
+      />
     </main>
   )
 }
