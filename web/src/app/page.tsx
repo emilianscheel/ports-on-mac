@@ -1,6 +1,8 @@
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 
+const checkoutHref = `/checkout?products=${process.env.NEXT_PUBLIC_POLAR_PRODUCT_ID}`;
+
 export default function Home() {
     return (
         <main className="grid min-h-svh grid-cols-1 md:grid-cols-2">
@@ -33,7 +35,7 @@ export default function Home() {
                         <Button
                             nativeButton={false}
                             variant="ghost"
-                            render={<a href="#buy" />}
+                            render={<a href={checkoutHref} />}
                             className="h-10 rounded-full bg-transparent px-4 text-[15px] text-black hover:bg-neutral-100"
                         >
                             Buy
