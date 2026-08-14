@@ -213,7 +213,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if enableHTTPS {
             do {
                 try LocalCertificateAuthority.shared.prepareCA()
-                NSApp.activate(ignoringOtherApps: true)
+                if try !LocalCertificateAuthority.shared.hasUserTrust() {
+                    NSApp.activate(ignoringOtherApps: true)
+                }
                 try LocalCertificateAuthority.shared.installUserTrust()
                 try LocalProxyServer.shared.updateRoutes(routes, httpsDomains: httpsDomains)
             } catch {

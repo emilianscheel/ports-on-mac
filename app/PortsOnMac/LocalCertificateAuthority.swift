@@ -50,6 +50,14 @@ final class LocalCertificateAuthority: @unchecked Sendable {
         try prepareCALocked()
     }
 
+    func hasUserTrust() throws -> Bool {
+        let der = try certificateDER
+        guard let certificate = SecCertificateCreateWithData(nil, der as CFData) else {
+            throw LocalCertificateError.encoding
+        }
+        return Self.isTrusted(certificate)
+    }
+
     func installUserTrust() throws {
         let der = try certificateDER
         guard let certificate = SecCertificateCreateWithData(nil, der as CFData) else {
