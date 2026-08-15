@@ -548,14 +548,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let usesHTTPS = binding?.usesHTTPS ?? false
         let context = PortMenuContext(entry: entry, domain: domain, usesHTTPS: usesHTTPS)
 
-        for detail in entry.details {
-            let detailItem = NSMenuItem(title: detail, action: nil, keyEquivalent: "")
-            detailItem.isEnabled = false
-            processMenu.addItem(detailItem)
-        }
-
-        processMenu.addItem(.separator())
-
         let openItem = NSMenuItem(title: "Open", action: #selector(openPort(_:)), keyEquivalent: "")
         openItem.target = self
         openItem.image = NSImage(systemSymbolName: "arrow.up.right", accessibilityDescription: "Open")
@@ -598,6 +590,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         killItem.image = NSImage(systemSymbolName: "stop.fill", accessibilityDescription: "Kill")
         killItem.representedObject = NSNumber(value: entry.pid)
         processMenu.addItem(killItem)
+
+        processMenu.addItem(.separator())
+
+        for detail in entry.details {
+            let detailItem = NSMenuItem(title: detail, action: nil, keyEquivalent: "")
+            detailItem.isEnabled = false
+            processMenu.addItem(detailItem)
+        }
 
         return processMenu
     }
