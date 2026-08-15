@@ -195,7 +195,7 @@ final class MenuSearchFieldController: NSObject, NSSearchFieldDelegate {
         caretView.frame = NSRect(
             x: x.rounded(.toNearestOrAwayFromZero),
             y: (iconView.frame.midY - height / 2).rounded(.toNearestOrAwayFromZero),
-            width: 1,
+            width: 2,
             height: height
         )
     }
@@ -318,6 +318,10 @@ private final class MenuSearchField: NSSearchField {
         editor.drawsBackground = false
         editor.backgroundColor = .clear
         editor.insertionPointColor = .clear
+        editor.selectedTextAttributes = [
+            .backgroundColor: NSColor.unemphasizedSelectedTextBackgroundColor,
+            .foregroundColor: NSColor.labelColor
+        ]
         if let scrollView = editor.enclosingScrollView {
             scrollView.drawsBackground = false
             scrollView.backgroundColor = .clear
@@ -355,7 +359,7 @@ private final class MenuSearchFieldCell: NSSearchFieldCell {
         let font = self.font ?? NSFont.menuFont(ofSize: 13)
         let lineHeight = ceil(font.ascender - font.descender)
         var aligned = rect
-        aligned.origin.y = floor((rect.height - lineHeight) / 2) + 1
+        aligned.origin.y = floor((rect.height - lineHeight) / 2)
         aligned.size.height = lineHeight
         return aligned
     }
@@ -363,10 +367,12 @@ private final class MenuSearchFieldCell: NSSearchFieldCell {
 
 private final class MenuSearchCaretView: NSView {
     override var isOpaque: Bool { false }
+    override var allowsVibrancy: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.controlAccentColor.setFill()
-        bounds.fill()
+        NSColor.systemGray.setFill()
+        let radius = bounds.width / 2
+        NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
     }
 }
 

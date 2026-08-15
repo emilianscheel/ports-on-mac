@@ -213,9 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if isSearching && !hasServices && !hasInbound && !hasOutbound {
             menu.addItem(.separator())
-            let emptyItem = NSMenuItem(title: "No Results", action: nil, keyEquivalent: "")
-            emptyItem.isEnabled = false
-            menu.addItem(emptyItem)
+            addNoMatchItem()
             return
         }
 
@@ -233,6 +231,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(.separator())
             addSection(snapshot.outbound, to: menu)
         }
+    }
+
+    private func addNoMatchItem() {
+        let assignable = assignableProcesses(from: lastSnapshot)
+        if LicenseStore.shared.hasDomainAccess, !assignable.isEmpty {
+            let item = NSMenuItem(title: "Assign Domain", action: nil, keyEquivalent: "")
+            item.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Assign Domain")
+            item.submenu = makeSearchAssignMenu(from: assignable)
+            menu.addItem(item)
+            return
+        }
+
+        let emptyItem = NSMenuItem(title: "No Results", action: nil, keyEquivalent: "")
+        emptyItem.isEnabled = false
+        menu.addItem(emptyItem)
+    }
+
+    private func assignableProcesses(from snapshot: MenuSnapshot) -> [PortEntry] {
+        snapshot.inbound.groups.flatMap(\.entries).filter { entry in
+            entry.canAssignDomain && bindings.binding(matching: entry) == nil
+        }
+    }
+
+    private func makeSearchAssignMenu(from entries: [PortEntry]) -> NSMenu {
+        let submenu = NSMenu()
+        for entry in entries {
+            let item = NSMenuItem(
+                title: ":\(entry.port)  \(entry.displayCommand)",
+                action: #selector(assignDomainFromSearch(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.image = ProcessIcon.image(for: entry)
+            item.representedObject = PortMenuContext(entry: entry, domain: nil)
+            submenu.addItem(item)
+        }
+        return submenu
     }
 
     private func makeSnapshot(from sections: [PortSection]) -> MenuSnapshot {
@@ -719,14 +754,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
+        let typed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawDomain = typed.isEmpty ? suggested : field.stringValue
+        completeAssignment(rawDomain: rawDomain, to: context.entry, usesHTTPS: httpsCheckbox.state == .on)
+    }
+
+    @objc private func assignDomainFromSearch(_ sender: NSMenuItem) {
+        guard let context = sender.representedObject as? PortMenuContext else { return }
+        do {
+            let domain = try domainFromSearchQuery(menuSearch.query)
+            completeAssignment(rawDomain: domain, to: context.entry, usesHTTPS: false)
+        } catch {
+            presentError(error, title: "Couldn’t assign domain")
+        }
+    }
+
+    private func domainFromSearchQuery(_ query: String) throws -> String {
+        do {
+            return try DomainName.normalize(query)
+        } catch {
+            if let suggested = DomainName.suggested(fromName: query) {
+                return suggested
+            }
+            throw error
+        }
+    }
+
+    private func completeAssignment(rawDomain: String, to entry: PortEntry, usesHTTPS: Bool) {
         Task { @MainActor in
             do {
-                let typed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                let rawDomain = typed.isEmpty ? suggested : field.stringValue
                 let domain = try DomainName.normalize(rawDomain)
-                let usesHTTPS = httpsCheckbox.state == .on
                 try ProxyHelperClient.shared.prepareForAssignment()
-                try bindings.assign(domain: rawDomain, to: context.entry, usesHTTPS: usesHTTPS)
+                try bindings.assign(domain: rawDomain, to: entry, usesHTTPS: usesHTTPS)
                 lastSyncedDomains = []
                 lastSyncedHTTPS = false
                 let httpsWarning: String?
@@ -739,7 +798,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     lastSyncedHTTPS = false
                     throw error
                 }
-                LastDomainStore.shared.remember(domain, for: context.entry)
+                LastDomainStore.shared.remember(domain, for: entry)
                 rebuildMenu(from: makeSnapshot(from: lastSections))
                 if let httpsWarning {
                     presentNotice(httpsWarning, title: "Assigned without HTTPS")
