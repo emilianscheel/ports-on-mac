@@ -1,17 +1,20 @@
 "use client";
 
-import { useState, type ComponentProps, type ReactNode } from "react";
+import { useMemo, useState, type ComponentProps, type ReactNode } from "react";
 import {
     Check,
     ChevronRight,
+    CircleX,
     Eye,
     Info,
     Key,
     Minus,
     MoveUpRight,
+    Plus,
     Power,
     RefreshCw,
     RotateCw,
+    Search,
     ShoppingBag,
     Square,
 } from "lucide-react";
@@ -57,6 +60,9 @@ type PortEntry = {
     process: string;
     icon: string;
     command: string;
+    protocol: string;
+    folder?: string;
+    cwd?: string;
     pid: number;
     user: string;
     fd: string;
@@ -70,6 +76,9 @@ const serviceEntry: PortEntry = {
     process: "node",
     icon: "/icons/ports-on-mac.png",
     command: "node",
+    protocol: "TCP",
+    folder: "ports-on-mac",
+    cwd: "/Users/coderdojo/Developer/ports-on-mac",
     pid: 93252,
     user: "coderdojo",
     fd: "17u",
@@ -83,6 +92,9 @@ const inboundEntries: PortEntry[] = [
         process: "container",
         icon: "/icons/terminal.png",
         command: "container",
+        protocol: "TCP",
+        folder: "api",
+        cwd: "/Users/coderdojo/Developer/api",
         pid: 18401,
         user: "coderdojo",
         fd: "12u",
@@ -94,6 +106,9 @@ const inboundEntries: PortEntry[] = [
         process: "Ports",
         icon: "/icons/ports-on-mac.png",
         command: "Ports",
+        protocol: "TCP",
+        folder: "Ports",
+        cwd: "/Applications/Ports.app",
         pid: 44120,
         user: "coderdojo",
         fd: "21u",
@@ -105,6 +120,9 @@ const inboundEntries: PortEntry[] = [
         process: "Paper",
         icon: "/icons/paper.png",
         command: "Paper",
+        protocol: "UDP",
+        folder: "paper",
+        cwd: "/Users/coderdojo/Developer/paper",
         pid: 55210,
         user: "coderdojo",
         fd: "18u",
@@ -116,11 +134,68 @@ const inboundEntries: PortEntry[] = [
         process: "Cursor",
         icon: "/icons/cursor.png",
         command: "Cursor",
+        protocol: "TCP",
+        folder: "cursor",
+        cwd: "/Applications/Cursor.app",
         pid: 61002,
         user: "coderdojo",
         fd: "24u",
     },
 ];
+
+function matchesSearch(entry: PortEntry, query: string) {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return true;
+    return [
+        entry.process,
+        entry.command,
+        String(entry.port),
+        `:${entry.port}`,
+        entry.protocol,
+        entry.folder,
+        entry.cwd,
+        entry.domain,
+    ].some((value) => value?.toLowerCase().includes(needle));
+}
+
+function domainFromQuery(query: string) {
+    const value = query.trim().toLowerCase();
+    if (!value) return null;
+    if (value.includes(".")) return value;
+    const slug = value.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    return slug ? `${slug}.com` : null;
+}
+
+function MenuSearchField({
+    value,
+    onChange,
+}: {
+    value: string;
+    onChange: (value: string) => void;
+}) {
+    return (
+        <div className="flex h-7 items-center gap-2 px-2">
+            <Search className="size-[14px] shrink-0 text-black/35" />
+            <input
+                value={value}
+                onChange={(event) => onChange(event.target.value)}
+                placeholder="Search"
+                spellCheck={false}
+                className="min-w-0 flex-1 translate-y-px bg-transparent text-[13px] leading-[16px] text-black/90 caret-[#8e8e93] outline-none placeholder:text-black/35 selection:bg-black/12 selection:text-inherit"
+            />
+            {value ? (
+                <button
+                    type="button"
+                    onClick={() => onChange("")}
+                    className="shrink-0 text-black/35 hover:text-black/55"
+                    aria-label="Clear"
+                >
+                    <CircleX className="size-[14px]" />
+                </button>
+            ) : null}
+        </div>
+    );
+}
 
 function AppIcon({ src }: { src: string }) {
     return (
@@ -232,7 +307,7 @@ function PortSubmenu({
         ["PID", String(entry.pid)],
         ["User", entry.user],
         ["Direction", "Inbound"],
-        ["Protocol", "TCP"],
+        ["Protocol", entry.protocol],
         ["Local", `*:${entry.port}`],
         ["State", "LISTEN"],
         ["FD", entry.fd],
@@ -276,10 +351,74 @@ function PortSubmenu({
     );
 }
 
+function AssignDomainRow({
+    selected,
+    onSelect,
+    processes,
+    onAssign,
+}: {
+    selected: boolean;
+    onSelect: () => void;
+    processes: PortEntry[];
+    onAssign: (entry: PortEntry) => void;
+}) {
+    return (
+        <div className="relative">
+            <MenuButton
+                selected={selected}
+                onPointerEnter={onSelect}
+                onClick={onSelect}
+            >
+                <Plus />
+                Assign Domain
+                <ChevronRight
+                    className={cn(
+                        "ml-auto size-3.5",
+                        selected ? "text-white" : "text-black/30",
+                    )}
+                />
+            </MenuButton>
+            {selected ? (
+                <div className="absolute top-0 left-full z-10 ml-1.5">
+                    <div className={subSurface}>
+                        {processes.map((entry) => (
+                            <MenuButton key={entry.id} onClick={() => onAssign(entry)}>
+                                <AppIcon src={entry.icon} />
+                                :{entry.port}  {entry.process}
+                            </MenuButton>
+                        ))}
+                    </div>
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
 export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
     const [openId, setOpenId] = useState(serviceEntry.id);
     const [useHttps, setUseHttps] = useState(true);
     const [showOutbound, setShowOutbound] = useState(false);
+    const [query, setQuery] = useState("");
+    const [assignments, setAssignments] = useState<Record<string, string>>({});
+
+    const services = useMemo(() => {
+        const assigned = inboundEntries.flatMap((entry) => {
+            const domain = assignments[entry.id];
+            return domain ? [{ ...entry, kind: "service" as const, domain }] : [];
+        });
+        return [serviceEntry, ...assigned];
+    }, [assignments]);
+
+    const inbound = useMemo(
+        () => inboundEntries.filter((entry) => !assignments[entry.id]),
+        [assignments],
+    );
+
+    const isSearching = query.trim().length > 0;
+    const visibleServices = services.filter((entry) => matchesSearch(entry, query));
+    const visibleInbound = inbound.filter((entry) => matchesSearch(entry, query));
+    const hasMatches = visibleServices.length > 0 || visibleInbound.length > 0;
+    const showAssign = isSearching && !hasMatches && inbound.length > 0;
 
     const submenuFor = (entry: PortEntry) => (
         <PortSubmenu
@@ -288,6 +427,14 @@ export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
             onToggleHttps={() => setUseHttps((value) => !value)}
         />
     );
+
+    const assignFromSearch = (entry: PortEntry) => {
+        const domain = domainFromQuery(query);
+        if (!domain) return;
+        setAssignments((current) => ({ ...current, [entry.id]: domain }));
+        setQuery("");
+        setOpenId(entry.id);
+    };
 
     return (
         <div className="relative w-[506px] max-w-full">
@@ -305,31 +452,58 @@ export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
                 </div>
 
                 <div className={separatorClass} />
-
-                <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-semibold tracking-wide text-black/40">
-                    Services
-                </div>
-                <PortRow
-                    entry={serviceEntry}
-                    selected={openId === serviceEntry.id}
-                    onSelect={() => setOpenId(serviceEntry.id)}
-                    submenu={submenuFor(serviceEntry)}
-                />
-
+                <MenuSearchField value={query} onChange={setQuery} />
                 <div className={separatorClass} />
 
-                <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-semibold tracking-wide text-black/40">
-                    Inbound
-                </div>
-                {inboundEntries.map((entry) => (
-                    <PortRow
-                        key={entry.id}
-                        entry={entry}
-                        selected={openId === entry.id}
-                        onSelect={() => setOpenId(entry.id)}
-                        submenu={submenuFor(entry)}
+                {showAssign ? (
+                    <AssignDomainRow
+                        selected={openId === "assign-domain"}
+                        onSelect={() => setOpenId("assign-domain")}
+                        processes={inbound}
+                        onAssign={assignFromSearch}
                     />
-                ))}
+                ) : null}
+
+                {!isSearching || visibleServices.length > 0 ? (
+                    <>
+                        <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-semibold tracking-wide text-black/40">
+                            Services
+                        </div>
+                        {visibleServices.map((entry) => (
+                            <PortRow
+                                key={entry.id}
+                                entry={entry}
+                                selected={openId === entry.id}
+                                onSelect={() => setOpenId(entry.id)}
+                                submenu={submenuFor(entry)}
+                            />
+                        ))}
+                    </>
+                ) : null}
+
+                {!isSearching || visibleInbound.length > 0 ? (
+                    <>
+                        <div className={separatorClass} />
+                        <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-semibold tracking-wide text-black/40">
+                            Inbound
+                        </div>
+                        {visibleInbound.map((entry) => (
+                            <PortRow
+                                key={entry.id}
+                                entry={entry}
+                                selected={openId === entry.id}
+                                onSelect={() => setOpenId(entry.id)}
+                                submenu={submenuFor(entry)}
+                            />
+                        ))}
+                    </>
+                ) : null}
+
+                {isSearching && !hasMatches && !showAssign ? (
+                    <div className="px-2 py-[4px] text-[13px] text-black/35">
+                        No Results
+                    </div>
+                ) : null}
 
                 <div className={separatorClass} />
 
