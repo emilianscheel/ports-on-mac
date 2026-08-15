@@ -78,6 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         isMenuOpen = true
         hasRebuiltSinceOpen = false
         scheduleRefresh()
+        DispatchQueue.main.async { [weak self] in
+            self?.menuSearch.restoreFocus()
+        }
     }
 
     func menuDidClose(_ menu: NSMenu) {
@@ -171,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             menu.removeAllItems()
             addStatusHeader(inboundCount: snapshot.inboundCount, outboundCount: snapshot.outboundCount)
+            menu.addItem(.separator())
             menu.addItem(menuSearch.menuItem)
             addProcessSections(
                 from: snapshot.filtered(query: query, showOutbound: showOutboundPorts),
@@ -194,6 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         addStatusHeader(inboundCount: snapshot.inboundCount, outboundCount: snapshot.outboundCount, at: 0)
+        menu.insertItem(.separator(), at: 2)
         addProcessSections(
             from: snapshot.filtered(query: query, showOutbound: showOutboundPorts),
             isSearching: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

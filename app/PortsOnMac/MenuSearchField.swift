@@ -34,10 +34,14 @@ final class MenuSearchFieldController: NSObject, NSSearchFieldDelegate {
     }
 
     func restoreFocus() {
-        guard searchField.window != nil else { return }
-        searchField.window?.makeFirstResponder(searchField)
+        guard let window = searchField.window else { return }
+        window.makeKey()
+        window.makeFirstResponder(searchField)
+        if searchField.currentEditor() == nil {
+            searchField.selectText(nil)
+        }
         searchField.makeEditorTransparent()
-        moveCaretToEnd()
+        showCaret()
     }
 
     private func configureIcon() {
@@ -119,10 +123,12 @@ final class MenuSearchFieldController: NSObject, NSSearchFieldDelegate {
         )
     }
 
-    private func moveCaretToEnd() {
-        guard let editor = searchField.currentEditor() else { return }
-        let end = (searchField.stringValue as NSString).length
-        editor.selectedRange = NSRange(location: end, length: 0)
+    private func showCaret() {
+        guard let editor = searchField.currentEditor() as? NSTextView else { return }
+        let location = (searchField.stringValue as NSString).length
+        editor.selectedRange = NSRange(location: location, length: 0)
+        editor.insertionPointColor = .controlAccentColor
+        editor.updateInsertionPointStateAndRestartTimer(true)
     }
 
     private func moveSelectionIntoMenu() {
@@ -219,9 +225,15 @@ private final class MenuSearchField: NSSearchField {
         cell?.drawInterior(withFrame: bounds, in: self)
     }
 
+    override var acceptsFirstResponder: Bool { true }
+
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
         makeEditorTransparent()
+        if let editor = currentEditor() as? NSTextView {
+            editor.insertionPointColor = .controlAccentColor
+            editor.updateInsertionPointStateAndRestartTimer(true)
+        }
         return result
     }
 
@@ -229,7 +241,7 @@ private final class MenuSearchField: NSSearchField {
         guard let editor = currentEditor() as? NSTextView else { return }
         editor.drawsBackground = false
         editor.backgroundColor = .clear
-        editor.insertionPointColor = .labelColor
+        editor.insertionPointColor = .controlAccentColor
         if let scrollView = editor.enclosingScrollView {
             scrollView.drawsBackground = false
             scrollView.backgroundColor = .clear
