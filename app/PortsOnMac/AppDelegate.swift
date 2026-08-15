@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var queuedRefresh = false
     private var refreshWaiters: [CheckedContinuation<MenuSnapshot, Never>] = []
     private var scanLoopTask: Task<Void, Never>?
+    private let menuSearch = MenuSearchFieldController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -53,6 +54,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.delegate = self
         statusItem.menu = menu
+        menuSearch.onQueryChange = { [weak self] _ in
+            guard let self else { return }
+            self.forceMenuRebuild = true
+            self.rebuildMenu(from: self.lastSnapshot)
+        }
         LicenseStore.shared.ensureTrialStarted()
         rebuildMenu(from: lastSnapshot)
         startScanLoop()
@@ -78,6 +84,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         isMenuOpen = false
         hasRebuiltSinceOpen = false
         forceMenuRebuild = false
+        if !menuSearch.query.isEmpty {
+            menuSearch.clear()
+            forceMenuRebuild = true
+            rebuildMenu(from: lastSnapshot)
+        }
     }
 
     private func startScanLoop() {
@@ -130,9 +141,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func rebuildMenu(from snapshot: MenuSnapshot) {
         lastSnapshot = snapshot
+        let query = menuSearch.query
         let fingerprint = snapshot.fingerprint(
             showOutbound: showOutboundPorts,
-            needsLicense: LicenseStore.shared.needsLicenseMenu
+            needsLicense: LicenseStore.shared.needsLicenseMenu,
+            searchQuery: query
         )
         let force = forceMenuRebuild
         forceMenuRebuild = false
@@ -150,85 +163,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         lastMenuFingerprint = fingerprint
-        menu.removeAllItems()
         syncProxy(with: snapshot)
 
-        addStatusHeader(inboundCount: snapshot.inboundCount, outboundCount: snapshot.outboundCount)
+        let keepSearchField = menu.items.contains { $0 === menuSearch.menuItem }
+        if keepSearchField {
+            replaceMenuItemsKeepingSearch(from: snapshot, query: query)
+        } else {
+            menu.removeAllItems()
+            addStatusHeader(inboundCount: snapshot.inboundCount, outboundCount: snapshot.outboundCount)
+            menu.addItem(menuSearch.menuItem)
+            addProcessSections(
+                from: snapshot.filtered(query: query, showOutbound: showOutboundPorts),
+                isSearching: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
+            addFooterItems()
+            if isMenuOpen {
+                menuSearch.restoreFocus()
+            }
+        }
+    }
 
-        if !snapshot.services.isEmpty {
+    private func replaceMenuItemsKeepingSearch(from snapshot: MenuSnapshot, query: String) {
+        guard let searchIndex = menu.items.firstIndex(where: { $0 === menuSearch.menuItem }) else { return }
+
+        for index in stride(from: menu.numberOfItems - 1, through: searchIndex + 1, by: -1) {
+            menu.removeItem(at: index)
+        }
+        for _ in 0..<searchIndex {
+            menu.removeItem(at: 0)
+        }
+
+        addStatusHeader(inboundCount: snapshot.inboundCount, outboundCount: snapshot.outboundCount, at: 0)
+        addProcessSections(
+            from: snapshot.filtered(query: query, showOutbound: showOutboundPorts),
+            isSearching: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        )
+        addFooterItems()
+    }
+
+    private func addProcessSections(from snapshot: MenuSnapshot, isSearching: Bool) {
+        let hasServices = !snapshot.services.isEmpty
+        let hasInbound = !snapshot.inbound.groups.isEmpty
+        let hasOutbound = showOutboundPorts && !snapshot.outbound.groups.isEmpty
+
+        if isSearching && !hasServices && !hasInbound && !hasOutbound {
+            menu.addItem(.separator())
+            let emptyItem = NSMenuItem(title: "No Results", action: nil, keyEquivalent: "")
+            emptyItem.isEnabled = false
+            menu.addItem(emptyItem)
+            return
+        }
+
+        if hasServices {
             menu.addItem(.separator())
             addServicesSection(snapshot.services)
         }
 
-        menu.addItem(.separator())
-        addSection(snapshot.inbound, to: menu)
+        if !isSearching || hasInbound {
+            menu.addItem(.separator())
+            addSection(snapshot.inbound, to: menu)
+        }
 
-        if showOutboundPorts {
+        if showOutboundPorts, !isSearching || hasOutbound {
             menu.addItem(.separator())
             addSection(snapshot.outbound, to: menu)
         }
-
-        menu.addItem(.separator())
-
-        let outboundToggleItem = NSMenuItem(
-            title: showOutboundPorts ? "Hide Outbound Ports" : "Show Outbound Ports",
-            action: #selector(toggleOutboundPorts),
-            keyEquivalent: ""
-        )
-        outboundToggleItem.target = self
-        outboundToggleItem.image = NSImage(
-            systemSymbolName: showOutboundPorts ? "eye.slash" : "eye",
-            accessibilityDescription: showOutboundPorts ? "Hide Outbound Ports" : "Show Outbound Ports"
-        )
-        menu.addItem(outboundToggleItem)
-
-        let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refresh), keyEquivalent: "r")
-        refreshItem.target = self
-        refreshItem.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
-        menu.addItem(refreshItem)
-
-        let updateItem = NSMenuItem(
-            title: "Check for Updates…",
-            action: #selector(checkForUpdates(_:)),
-            keyEquivalent: ""
-        )
-        updateItem.target = self
-        updateItem.image = NSImage(
-            systemSymbolName: "arrow.trianglehead.2.clockwise.rotate.90",
-            accessibilityDescription: "Check for Updates"
-        )
-        updateItem.isEnabled = updater?.canCheckForUpdates ?? true
-        menu.addItem(updateItem)
-
-        if LicenseStore.shared.needsLicenseMenu {
-            let buyItem = NSMenuItem(
-                title: "Buy License Key",
-                action: #selector(buyLicenseKey),
-                keyEquivalent: ""
-            )
-            buyItem.target = self
-            buyItem.image = NSImage(systemSymbolName: "bag", accessibilityDescription: "Buy License Key")
-            menu.addItem(buyItem)
-
-            let activateItem = NSMenuItem(
-                title: "Activate License Key",
-                action: #selector(activateLicenseKey),
-                keyEquivalent: ""
-            )
-            activateItem.target = self
-            activateItem.image = NSImage(systemSymbolName: "key", accessibilityDescription: "Activate License Key")
-            menu.addItem(activateItem)
-        }
-
-        let aboutItem = NSMenuItem(title: "About Ports on Mac", action: #selector(showAbout), keyEquivalent: "")
-        aboutItem.target = self
-        aboutItem.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "About Ports on Mac")
-        menu.addItem(aboutItem)
-
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
-        quitItem.target = self
-        quitItem.image = NSImage(systemSymbolName: "power", accessibilityDescription: "Quit")
-        menu.addItem(quitItem)
     }
 
     private func makeSnapshot(from sections: [PortSection]) -> MenuSnapshot {
@@ -385,7 +384,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return "The domain still works over HTTP. HTTPS couldn’t be enabled (\(reason)). Choose Use HTTPS to try again."
     }
 
-    private func addStatusHeader(inboundCount: Int, outboundCount: Int) {
+    private func addStatusHeader(inboundCount: Int, outboundCount: Int, at index: Int? = nil) {
         let liveItem = NSMenuItem(title: "Live", action: nil, keyEquivalent: "")
         liveItem.isEnabled = false
         liveItem.image = ProcessIcon.liveDot()
@@ -396,7 +395,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .foregroundColor: NSColor.secondaryLabelColor
             ]
         )
-        menu.addItem(liveItem)
 
         let stats = "\(inboundCount) inbound, \(outboundCount) outbound"
         let statsItem = NSMenuItem(title: stats, action: nil, keyEquivalent: "")
@@ -409,7 +407,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .foregroundColor: NSColor.secondaryLabelColor
             ]
         )
-        menu.addItem(statsItem)
+
+        if let index {
+            menu.insertItem(liveItem, at: index)
+            menu.insertItem(statsItem, at: index + 1)
+        } else {
+            menu.addItem(liveItem)
+            menu.addItem(statsItem)
+        }
+    }
+
+    private func addFooterItems() {
+        menu.addItem(.separator())
+
+        let outboundToggleItem = NSMenuItem(
+            title: showOutboundPorts ? "Hide Outbound Ports" : "Show Outbound Ports",
+            action: #selector(toggleOutboundPorts),
+            keyEquivalent: ""
+        )
+        outboundToggleItem.target = self
+        outboundToggleItem.image = NSImage(
+            systemSymbolName: showOutboundPorts ? "eye.slash" : "eye",
+            accessibilityDescription: showOutboundPorts ? "Hide Outbound Ports" : "Show Outbound Ports"
+        )
+        menu.addItem(outboundToggleItem)
+
+        let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refresh), keyEquivalent: "r")
+        refreshItem.target = self
+        refreshItem.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
+        menu.addItem(refreshItem)
+
+        let updateItem = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        updateItem.target = self
+        updateItem.image = NSImage(
+            systemSymbolName: "arrow.trianglehead.2.clockwise.rotate.90",
+            accessibilityDescription: "Check for Updates"
+        )
+        updateItem.isEnabled = updater?.canCheckForUpdates ?? true
+        menu.addItem(updateItem)
+
+        if LicenseStore.shared.needsLicenseMenu {
+            let buyItem = NSMenuItem(
+                title: "Buy License Key",
+                action: #selector(buyLicenseKey),
+                keyEquivalent: ""
+            )
+            buyItem.target = self
+            buyItem.image = NSImage(systemSymbolName: "bag", accessibilityDescription: "Buy License Key")
+            menu.addItem(buyItem)
+
+            let activateItem = NSMenuItem(
+                title: "Activate License Key",
+                action: #selector(activateLicenseKey),
+                keyEquivalent: ""
+            )
+            activateItem.target = self
+            activateItem.image = NSImage(systemSymbolName: "key", accessibilityDescription: "Activate License Key")
+            menu.addItem(activateItem)
+        }
+
+        let aboutItem = NSMenuItem(title: "About Ports on Mac", action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
+        aboutItem.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "About Ports on Mac")
+        menu.addItem(aboutItem)
+
+        let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        quitItem.image = NSImage(systemSymbolName: "power", accessibilityDescription: "Quit")
+        menu.addItem(quitItem)
     }
 
     private func addServicesSection(_ services: [(entry: PortEntry, binding: ServiceBinding)]) {
@@ -787,12 +856,34 @@ private struct MenuSnapshot {
     let inbound: PortSection
     let outbound: PortSection
 
-    func fingerprint(showOutbound: Bool, needsLicense: Bool) -> String {
+    func filtered(query: String, showOutbound: Bool) -> MenuSnapshot {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if needle.isEmpty { return self }
+
+        let filteredServices = services.filter { service in
+            service.entry.matchesSearch(needle, extraTerms: [service.binding.domain])
+        }
+        let inboundGroups = inbound.groups.compactMap { $0.filtered(matching: needle) }
+        let outboundGroups = showOutbound
+            ? outbound.groups.compactMap { $0.filtered(matching: needle) }
+            : outbound.groups
+
+        return MenuSnapshot(
+            inboundCount: inboundCount,
+            outboundCount: outboundCount,
+            services: filteredServices,
+            inbound: PortSection(direction: .inbound, groups: inboundGroups),
+            outbound: PortSection(direction: .outbound, groups: outboundGroups)
+        )
+    }
+
+    func fingerprint(showOutbound: Bool, needsLicense: Bool, searchQuery: String = "") -> String {
         var parts = [
             "\(inboundCount)",
             "\(outboundCount)",
             showOutbound ? "out" : "in",
-            needsLicense ? "lic" : "ok"
+            needsLicense ? "lic" : "ok",
+            "q:\(searchQuery)"
         ]
         parts.append(contentsOf: services.map { service in
             "\(service.binding.domain)#\(service.binding.usesHTTPS)#\(service.entry.processIdentity)#\(service.entry.port)"

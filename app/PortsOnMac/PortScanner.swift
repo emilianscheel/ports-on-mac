@@ -62,6 +62,12 @@ struct PortGroup: Sendable {
     var hasSingleProcess: Bool {
         Set(entries.map(\.processIdentity)).count == 1
     }
+
+    func filtered(matching query: String) -> PortGroup? {
+        let matched = entries.filter { $0.matchesSearch(query) }
+        guard !matched.isEmpty else { return nil }
+        return PortGroup(direction: direction, port: port, entries: matched)
+    }
 }
 
 struct DockerContainer: Sendable {
@@ -172,6 +178,31 @@ struct PortEntry: Sendable {
         let name = URL(fileURLWithPath: currentWorkingDirectory).lastPathComponent
         guard !name.isEmpty, name != "/", name != ".", name != ".." else { return nil }
         return name
+    }
+
+    func matchesSearch(_ query: String, extraTerms: [String] = []) -> Bool {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if needle.isEmpty { return true }
+
+        var haystacks = [
+            command,
+            displayCommand,
+            String(port),
+            ":\(port)",
+            protocolName
+        ]
+        if let currentWorkingDirectory, !currentWorkingDirectory.isEmpty {
+            haystacks.append(currentWorkingDirectory)
+        }
+        if let projectFolderName {
+            haystacks.append(projectFolderName)
+        }
+        haystacks.append(contentsOf: dockerContainers.flatMap { container in
+            [container.name, container.id, container.title]
+        })
+        haystacks.append(contentsOf: extraTerms)
+
+        return haystacks.contains { $0.lowercased().contains(needle) }
     }
 
     private static let genericProjectFolderNames: Set<String> = [
