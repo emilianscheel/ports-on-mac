@@ -30,10 +30,13 @@ final class LocalProxyServer: @unchecked Sendable {
     private var httpsHosts: Set<String> = []
     private var lastHTTPSDomains: [String] = []
 
-    func updateRoutes(_ routes: [String: Int], httpsDomains: [String] = []) throws {
+    func updateRoutes(
+        _ routes: [String: Int], preferHTTPS: [String] = [], enableTLS: Bool = true
+    ) throws {
         let normalized = Dictionary(
             uniqueKeysWithValues: routes.map { ($0.key.lowercased(), $0.value) })
-        let https = Array(Set(httpsDomains.map { $0.lowercased() })).sorted()
+        let https = Array(Set(preferHTTPS.map { $0.lowercased() })).sorted()
+        let tlsDomains = enableTLS ? Array(normalized.keys).sorted() : []
         let shouldStart = queue.sync { () -> Bool in
             self.routes = normalized
             self.httpsHosts = Set(https)
@@ -47,7 +50,7 @@ final class LocalProxyServer: @unchecked Sendable {
 
         guard shouldStart else { return }
         try startHTTP()
-        try updateHTTPS(https)
+        try updateHTTPS(tlsDomains)
     }
 
     private func startHTTP() throws {
@@ -244,6 +247,12 @@ final class LocalProxyServer: @unchecked Sendable {
             return
         }
 
+        if proto == "https", !httpsHosts.contains(host) {
+            let path = Self.requestTarget(fromHeaderBlock: headerBlock)
+            sendRedirect(client, location: "http://\(host)\(path)")
+            return
+        }
+
         let tcp = NWProtocolTCP.Options()
         tcp.connectionTimeout = 1
         let parameters = NWParameters(tls: nil, tcp: tcp)
@@ -327,8 +336,9 @@ final class LocalProxyServer: @unchecked Sendable {
         let response =
             Data(
                 """
-                HTTP/1.1 301 Moved Permanently\r
+                HTTP/1.1 307 Temporary Redirect\r
                 Location: \(location)\r
+                Cache-Control: no-store\r
                 Connection: close\r
                 Content-Type: text/plain; charset=utf-8\r
                 Content-Length: \(body.count)\r

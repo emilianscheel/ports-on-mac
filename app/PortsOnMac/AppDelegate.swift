@@ -64,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         scanLoopTask?.cancel()
-        try? LocalProxyServer.shared.updateRoutes([:], httpsDomains: [])
+        try? LocalProxyServer.shared.updateRoutes([:], preferHTTPS: [], enableTLS: false)
         ProxyHelperClient.shared.clearLiveDomainsBlocking()
     }
 
@@ -280,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func tearDownProxy() {
-        try? LocalProxyServer.shared.updateRoutes([:], httpsDomains: [])
+        try? LocalProxyServer.shared.updateRoutes([:], preferHTTPS: [], enableTLS: false)
         ProxyHelperClient.shared.clearLiveDomainsBlocking()
         lastSyncedDomains = []
         lastSyncedHTTPS = false
@@ -291,29 +291,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func applyProxy(snapshot: MenuSnapshot, forceHelper: Bool) async throws -> String? {
         let routes = Dictionary(uniqueKeysWithValues: snapshot.services.map { ($0.binding.domain, $0.entry.port) })
         let domains = snapshot.services.map(\.binding.domain)
-        let httpsDomains = snapshot.services.filter(\.binding.usesHTTPS).map(\.binding.domain)
-        var enableHTTPS = !httpsDomains.isEmpty
+        let preferHTTPS = snapshot.services.filter(\.binding.usesHTTPS).map(\.binding.domain)
+        var enableHTTPS = !domains.isEmpty
         var httpsWarning: String?
 
-        if enableHTTPS {
+        if domains.isEmpty {
+            try LocalProxyServer.shared.updateRoutes([:], preferHTTPS: [], enableTLS: false)
+        } else {
             do {
                 try LocalCertificateAuthority.shared.prepareCA()
                 if try !LocalCertificateAuthority.shared.hasUserTrust() {
                     NSApp.activate(ignoringOtherApps: true)
                 }
                 try LocalCertificateAuthority.shared.installUserTrust()
-                try LocalProxyServer.shared.updateRoutes(routes, httpsDomains: httpsDomains)
+                try LocalProxyServer.shared.updateRoutes(routes, preferHTTPS: preferHTTPS)
             } catch {
                 NSLog("Ports on Mac local HTTPS setup failed: \(error.localizedDescription)")
-                for domain in httpsDomains {
+                for domain in preferHTTPS {
                     try? bindings.setUsesHTTPS(false, domain: domain)
                 }
-                try LocalProxyServer.shared.updateRoutes(routes, httpsDomains: [])
+                try LocalProxyServer.shared.updateRoutes(routes, preferHTTPS: [], enableTLS: false)
                 enableHTTPS = false
-                httpsWarning = "The domain still works over HTTP. HTTPS couldn’t be enabled (\(error.localizedDescription)). Use Enable HTTPS to try again."
+                httpsWarning = "The domain still works over HTTP. HTTPS couldn’t be enabled (\(error.localizedDescription)). Choose Use HTTPS to try again."
             }
-        } else {
-            try LocalProxyServer.shared.updateRoutes(routes, httpsDomains: [])
         }
 
         let shouldSyncHelper = forceHelper || domains != lastSyncedDomains || enableHTTPS != lastSyncedHTTPS || !hasSyncedLiveDomains
@@ -345,7 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     return try await fallBackToHTTP(
                         routes: routes,
                         domains: domains,
-                        httpsDomains: httpsDomains,
+                        preferHTTPS: preferHTTPS,
                         reason: error.localizedDescription
                     )
                 }
@@ -354,7 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return try await fallBackToHTTP(
                     routes: routes,
                     domains: domains,
-                    httpsDomains: httpsDomains,
+                    preferHTTPS: preferHTTPS,
                     reason: error.localizedDescription
                 )
             }
@@ -371,18 +371,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func fallBackToHTTP(
         routes: [String: Int],
         domains: [String],
-        httpsDomains: [String],
+        preferHTTPS: [String],
         reason: String
     ) async throws -> String {
-        for domain in httpsDomains {
+        for domain in preferHTTPS {
             try? bindings.setUsesHTTPS(false, domain: domain)
         }
-        try LocalProxyServer.shared.updateRoutes(routes, httpsDomains: [])
+        try LocalProxyServer.shared.updateRoutes(routes, preferHTTPS: [], enableTLS: false)
         try await ProxyHelperClient.shared.syncLiveDomains(domains, enableHTTPS: false)
         lastSyncedDomains = domains
         lastSyncedHTTPS = false
         hasSyncedLiveDomains = true
-        return "The domain still works over HTTP. HTTPS couldn’t be enabled (\(reason)). Use Enable HTTPS to try again."
+        return "The domain still works over HTTP. HTTPS couldn’t be enabled (\(reason)). Choose Use HTTPS to try again."
     }
 
     private func addStatusHeader(inboundCount: Int, outboundCount: Int) {
@@ -631,7 +631,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         field.bezelStyle = .roundedBezel
         field.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
 
-        let httpsCheckbox = NSButton(checkboxWithTitle: "Enable HTTPS", target: nil, action: nil)
+        let httpsCheckbox = NSButton(checkboxWithTitle: "Use HTTPS", target: nil, action: nil)
         httpsCheckbox.state = .off
         httpsCheckbox.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         httpsCheckbox.frame = NSRect(x: 0, y: 0, width: fieldWidth, height: 21)
@@ -686,18 +686,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let enable = !context.usesHTTPS
         Task { @MainActor in
             do {
-                try ProxyHelperClient.shared.prepareForAssignment()
                 try bindings.setUsesHTTPS(enable, domain: domain)
-                lastSyncedDomains = []
-                lastSyncedHTTPS = false
                 let httpsWarning: String?
                 do {
                     let snapshot = await refreshSnapshot()
-                    httpsWarning = try await applyProxy(snapshot: snapshot, forceHelper: true)
+                    httpsWarning = try await applyProxy(snapshot: snapshot, forceHelper: false)
                 } catch {
                     try? bindings.setUsesHTTPS(!enable, domain: domain)
-                    lastSyncedDomains = []
-                    lastSyncedHTTPS = false
                     throw error
                 }
                 rebuildMenu(from: makeSnapshot(from: lastSections))
