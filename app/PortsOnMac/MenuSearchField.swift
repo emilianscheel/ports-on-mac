@@ -26,7 +26,6 @@ final class MenuSearchFieldController: NSObject, NSSearchFieldDelegate {
         configureClearButton()
         layout()
         menuItem.view = container
-        container.searchField = searchField
         container.onAttachedToWindow = { [weak self] in
             self?.restoreFocus()
         }
@@ -140,7 +139,7 @@ final class MenuSearchFieldController: NSObject, NSSearchFieldDelegate {
     private func startCaretBlink() {
         caretOn = true
         caretView.alphaValue = 1
-        observeEditorSelection()
+        caretView.isHidden = false
         updateCaretPosition()
         caretTimer?.invalidate()
         let timer = Timer(timeInterval: 0.53, repeats: true) { [weak self] _ in
@@ -154,14 +153,12 @@ final class MenuSearchFieldController: NSObject, NSSearchFieldDelegate {
     }
 
     private func stopCaretBlink() {
-        stopObservingEditorSelection()
         caretTimer?.invalidate()
         caretTimer = nil
         caretView.isHidden = true
     }
 
     private func toggleCaret() {
-        guard !caretView.isHidden else { return }
         caretOn.toggle()
         caretView.alphaValue = caretOn ? 1 : 0
     }
@@ -169,61 +166,28 @@ final class MenuSearchFieldController: NSObject, NSSearchFieldDelegate {
     private func restartCaretBlink() {
         caretOn = true
         caretView.alphaValue = 1
+        caretView.isHidden = false
         updateCaretPosition()
         startCaretBlink()
     }
 
-    private func observeEditorSelection() {
-        NotificationCenter.default.removeObserver(
-            self,
-            name: NSTextView.didChangeSelectionNotification,
-            object: nil
-        )
-        guard let editor = searchField.currentEditor() as? NSTextView else { return }
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(editorSelectionDidChange(_:)),
-            name: NSTextView.didChangeSelectionNotification,
-            object: editor
-        )
-    }
-
-    private func stopObservingEditorSelection() {
-        NotificationCenter.default.removeObserver(
-            self,
-            name: NSTextView.didChangeSelectionNotification,
-            object: nil
-        )
-    }
-
-    @objc private func editorSelectionDidChange(_: Notification) {
-        updateCaretPosition()
-    }
-
     private func updateCaretPosition() {
-        guard let editor = searchField.currentEditor() as? NSTextView else {
-            caretView.isHidden = true
-            return
-        }
-
-        if editor.selectedRange.length > 0 {
-            caretView.isHidden = true
-            return
-        }
-
-        caretView.isHidden = false
-
         let font = searchField.font ?? NSFont.menuFont(ofSize: 13)
         let height = ceil(font.ascender - font.descender)
-        let location = min(editor.selectedRange.location, (editor.string as NSString).length)
-        let screenRect = editor.firstRect(
-            forCharacterRange: NSRange(location: location, length: 0),
-            actualRange: nil
-        )
-        let x: CGFloat
-        if let window = container.window, screenRect != .zero {
-            let windowRect = window.convertFromScreen(screenRect)
-            x = container.convert(windowRect, from: nil).minX
+        var x = searchField.frame.minX
+
+        if let editor = searchField.currentEditor() as? NSTextView {
+            let location = min(editor.selectedRange.location, (editor.string as NSString).length)
+            let screenRect = editor.firstRect(
+                forCharacterRange: NSRange(location: location, length: 0),
+                actualRange: nil
+            )
+            if let window = container.window, screenRect != .zero {
+                let windowRect = window.convertFromScreen(screenRect)
+                x = container.convert(windowRect, from: nil).minX
+            } else {
+                x = searchField.frame.minX + textWidth(searchField.stringValue, font: font)
+            }
         } else {
             x = searchField.frame.minX + textWidth(searchField.stringValue, font: font)
         }
@@ -349,56 +313,6 @@ private final class MenuSearchField: NSSearchField {
         return result
     }
 
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if handleEditingKeyEquivalent(event) {
-            return true
-        }
-        return super.performKeyEquivalent(with: event)
-    }
-
-    func handleEditingKeyEquivalent(_ event: NSEvent) -> Bool {
-        guard let editor = currentEditor() else { return false }
-
-        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
-        guard flags.contains(.command),
-              !flags.contains(.option),
-              !flags.contains(.control),
-              let key = event.charactersIgnoringModifiers?.lowercased()
-        else {
-            return false
-        }
-
-        let shift = flags.contains(.shift)
-        if !shift {
-            switch key {
-            case "a":
-                editor.selectAll(nil)
-                return true
-            case "c":
-                editor.copy(nil)
-                return true
-            case "x":
-                editor.cut(nil)
-                return true
-            case "v":
-                editor.paste(nil)
-                return true
-            case "z":
-                editor.undoManager?.undo()
-                return true
-            default:
-                return false
-            }
-        }
-
-        if key == "z" {
-            editor.undoManager?.redo()
-            return true
-        }
-
-        return false
-    }
-
     func makeEditorTransparent() {
         guard let editor = currentEditor() as? NSTextView else { return }
         editor.drawsBackground = false
@@ -465,17 +379,9 @@ private final class MenuSearchCaretView: NSView {
 private final class MenuSearchContainerView: NSView {
     var onAttachedToWindow: (() -> Void)?
     var onDetachedFromWindow: (() -> Void)?
-    weak var searchField: MenuSearchField?
 
     override var isOpaque: Bool { false }
     override var allowsVibrancy: Bool { true }
-
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if searchField?.handleEditingKeyEquivalent(event) == true {
-            return true
-        }
-        return super.performKeyEquivalent(with: event)
-    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
