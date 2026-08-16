@@ -199,7 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         addStatusHeader(inboundCount: snapshot.inboundCount, outboundCount: snapshot.outboundCount, at: 0)
-        menu.insertItem(.separator(), at: 2)
+        menu.insertItem(.separator(), at: 1)
         addProcessSections(
             from: snapshot.filtered(query: query, showOutbound: showOutboundPorts),
             isSearching: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -442,25 +442,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .foregroundColor: NSColor.secondaryLabelColor
             ]
         )
-
-        let stats = "\(inboundCount) inbound, \(outboundCount) outbound"
-        let statsItem = NSMenuItem(title: stats, action: nil, keyEquivalent: "")
-        statsItem.isEnabled = false
-        statsItem.image = ProcessIcon.placeholder()
-        statsItem.attributedTitle = NSAttributedString(
-            string: stats,
-            attributes: [
-                .font: NSFont.menuFont(ofSize: 0),
-                .foregroundColor: NSColor.secondaryLabelColor
-            ]
-        )
+        liveItem.subtitle = "\(inboundCount) inbound, \(outboundCount) outbound"
 
         if let index {
             menu.insertItem(liveItem, at: index)
-            menu.insertItem(statsItem, at: index + 1)
         } else {
             menu.addItem(liveItem)
-            menu.addItem(statsItem)
         }
     }
 

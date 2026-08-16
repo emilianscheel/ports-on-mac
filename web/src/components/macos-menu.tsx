@@ -455,16 +455,16 @@ export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
     return (
         <div className="relative w-[280px] max-w-full md:w-[506px]">
             <div className={cn(menuSurface, "overflow-visible")}>
-                <div className="flex items-start gap-2 px-2 py-1.5">
-                    <span className="mt-[5px] size-[7px] shrink-0 rounded-full bg-black/25" />
-                    <div>
-                        <div className="text-[13px] leading-[16px] text-black/40">
+                <div className="flex items-center gap-2 px-2 py-1.5">
+                    <span className="size-[7px] shrink-0 rounded-full bg-black/25" />
+                    <span className="flex min-w-0 flex-1 flex-col items-start leading-tight">
+                        <span className="text-[13px] text-black/40">
                             Live
-                        </div>
-                        <div className="text-[11px] leading-[14px] text-black/35">
+                        </span>
+                        <span className="text-[11px] text-black/35">
                             12 inbound, 30 outbound
-                        </div>
-                    </div>
+                        </span>
+                    </span>
                 </div>
 
                 <div className={separatorClass} />
