@@ -1,6 +1,12 @@
 "use client";
 
-import { useMemo, useState, type ComponentProps, type ReactNode } from "react";
+import {
+    useLayoutEffect,
+    useMemo,
+    useState,
+    type ComponentProps,
+    type ReactNode,
+} from "react";
 import {
     Check,
     ChevronRight,
@@ -20,12 +26,12 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+
+const desktopMenuQuery = "(min-width: 768px)";
+
+function isDesktopMenu() {
+    return window.matchMedia(desktopMenuQuery).matches;
+}
 
 const menuFont =
     "font-[-apple-system,BlinkMacSystemFont,'SF_Pro_Text','Helvetica_Neue',sans-serif]";
@@ -37,18 +43,18 @@ const menuSurface = cn(
 
 const subSurface = cn(
     menuFont,
-    "w-[220px] rounded-[10px] bg-[#f6f6f6]/80 p-[5px] text-[13px] text-black/85 shadow-[0_0_0_0.5px_rgba(0,0,0,0.18),0_12px_40px_rgba(0,0,0,0.18)] backdrop-blur-xl backdrop-saturate-150",
+    "w-full rounded-[10px] bg-[#f6f6f6]/80 p-[5px] text-[13px] text-black/85 shadow-[0_0_0_0.5px_rgba(0,0,0,0.18),0_12px_40px_rgba(0,0,0,0.18)] backdrop-blur-xl backdrop-saturate-150 md:w-[220px]",
 );
 
 const itemClass = cn(
-    "flex h-auto w-full items-center justify-start gap-2 rounded-[5px] border-0 bg-transparent px-2 py-[4px] text-left text-[13px] leading-[16px] font-normal text-black/90 shadow-none outline-none",
+    "group/item flex h-auto w-full items-center justify-start gap-2 rounded-[5px] border-0 bg-transparent px-2 py-[4px] text-left text-[13px] leading-[16px] font-normal text-black/90 shadow-none outline-none",
     "[&_svg]:size-[14px] [&_svg]:shrink-0 [&_svg]:text-black/65",
-    "hover:bg-[#007AFF] hover:text-white hover:[&_svg]:text-white",
-    "focus-visible:bg-[#007AFF] focus-visible:text-white focus-visible:[&_svg]:text-white",
+    "hover:bg-[#007AFF] hover:text-white hover:[&_svg]:text-white hover:[&_span]:text-white",
+    "focus-visible:bg-[#007AFF] focus-visible:text-white focus-visible:[&_svg]:text-white focus-visible:[&_span]:text-white",
 );
 
 const selectedItemClass =
-    "bg-[#007AFF] text-white [&_svg]:text-white hover:bg-[#007AFF] hover:text-white";
+    "bg-[#007AFF] text-white [&_svg]:text-white [&_span]:text-white hover:bg-[#007AFF] hover:text-white hover:[&_span]:text-white";
 
 const separatorClass = "mx-1 my-1 h-px bg-black/10";
 
@@ -223,68 +229,60 @@ function MenuButton({
     );
 }
 
+function SubmenuFlyout({ children }: { children: ReactNode }) {
+    return (
+        <div className="mt-1 md:absolute md:top-0 md:left-full md:z-10 md:mt-0 md:ml-1.5">
+            {children}
+        </div>
+    );
+}
+
 function PortRow({
     entry,
     selected,
     onSelect,
+    onHover,
     submenu,
 }: {
     entry: PortEntry;
     selected: boolean;
     onSelect: () => void;
+    onHover: () => void;
     submenu: ReactNode;
 }) {
     return (
         <div className="relative">
-            <DropdownMenu
-                open={selected}
-                modal={false}
-                onOpenChange={(next) => {
-                    if (next) onSelect();
-                }}
+            <MenuButton
+                selected={selected}
+                onPointerEnter={onHover}
+                onClick={onSelect}
             >
-                <DropdownMenuTrigger
-                    className={cn(itemClass, selected && selectedItemClass)}
-                    onPointerEnter={onSelect}
-                    onClick={onSelect}
-                >
-                    <AppIcon src={entry.icon} />
-                    {entry.kind === "service" ? (
-                        <span className="flex min-w-0 flex-1 flex-col items-start leading-tight">
-                            <span className="font-medium">{entry.domain}</span>
-                            <span
-                                className={cn(
-                                    "text-[11px]",
-                                    selected ? "text-white/85" : "text-black/45",
-                                )}
-                            >
-                                :{entry.port} {entry.process}
-                            </span>
-                        </span>
-                    ) : (
-                        <span className="flex-1 text-left">
+                <AppIcon src={entry.icon} />
+                {entry.kind === "service" ? (
+                    <span className="flex min-w-0 flex-1 flex-col items-start leading-tight">
+                        <span className="font-medium">{entry.domain}</span>
+                        <span
+                            className={cn(
+                                "text-[11px] text-black/45 group-hover/item:text-white/85 group-focus-visible/item:text-white/85",
+                                selected && "text-white/85",
+                            )}
+                        >
                             :{entry.port} {entry.process}
                         </span>
+                    </span>
+                ) : (
+                    <span className="flex-1 text-left">
+                        :{entry.port} {entry.process}
+                    </span>
+                )}
+                <ChevronRight
+                    className={cn(
+                        "ml-auto size-3.5",
+                        selected ? "text-white max-md:rotate-90" : "text-black/30",
                     )}
-                    <ChevronRight
-                        className={cn(
-                            "ml-auto size-3.5",
-                            selected ? "text-white" : "text-black/30",
-                        )}
-                    />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                    side="right"
-                    align="start"
-                    sideOffset={6}
-                    className="hidden"
-                >
-                    <DropdownMenuItem>Open</DropdownMenuItem>
-                </DropdownMenuContent>
-            </DropdownMenu>
-            {selected ? (
-                <div className="absolute top-0 left-full z-10 ml-1.5">{submenu}</div>
-            ) : null}
+                />
+            </MenuButton>
+            {selected ? <SubmenuFlyout>{submenu}</SubmenuFlyout> : null}
         </div>
     );
 }
@@ -354,11 +352,13 @@ function PortSubmenu({
 function AssignDomainRow({
     selected,
     onSelect,
+    onHover,
     processes,
     onAssign,
 }: {
     selected: boolean;
     onSelect: () => void;
+    onHover: () => void;
     processes: PortEntry[];
     onAssign: (entry: PortEntry) => void;
 }) {
@@ -366,7 +366,7 @@ function AssignDomainRow({
         <div className="relative">
             <MenuButton
                 selected={selected}
-                onPointerEnter={onSelect}
+                onPointerEnter={onHover}
                 onClick={onSelect}
             >
                 <Plus />
@@ -374,12 +374,12 @@ function AssignDomainRow({
                 <ChevronRight
                     className={cn(
                         "ml-auto size-3.5",
-                        selected ? "text-white" : "text-black/30",
+                        selected ? "text-white max-md:rotate-90" : "text-black/30",
                     )}
                 />
             </MenuButton>
             {selected ? (
-                <div className="absolute top-0 left-full z-10 ml-1.5">
+                <SubmenuFlyout>
                     <div className={subSurface}>
                         {processes.map((entry) => (
                             <MenuButton key={entry.id} onClick={() => onAssign(entry)}>
@@ -388,18 +388,34 @@ function AssignDomainRow({
                             </MenuButton>
                         ))}
                     </div>
-                </div>
+                </SubmenuFlyout>
             ) : null}
         </div>
     );
 }
 
 export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
-    const [openId, setOpenId] = useState(serviceEntry.id);
+    const [openId, setOpenId] = useState<string | null>(serviceEntry.id);
     const [useHttps, setUseHttps] = useState(true);
     const [showOutbound, setShowOutbound] = useState(false);
     const [query, setQuery] = useState("");
     const [assignments, setAssignments] = useState<Record<string, string>>({});
+
+    useLayoutEffect(() => {
+        if (!isDesktopMenu()) setOpenId(null);
+    }, []);
+
+    const hoverItem = (id: string) => {
+        if (isDesktopMenu()) setOpenId(id);
+    };
+
+    const selectItem = (id: string) => {
+        if (isDesktopMenu()) {
+            setOpenId(id);
+            return;
+        }
+        setOpenId((current) => (current === id ? null : id));
+    };
 
     const services = useMemo(() => {
         const assigned = inboundEntries.flatMap((entry) => {
@@ -437,7 +453,7 @@ export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
     };
 
     return (
-        <div className="relative w-[506px] max-w-full">
+        <div className="relative w-[280px] max-w-full md:w-[506px]">
             <div className={cn(menuSurface, "overflow-visible")}>
                 <div className="flex items-start gap-2 px-2 py-1.5">
                     <span className="mt-[5px] size-[7px] shrink-0 rounded-full bg-black/25" />
@@ -458,7 +474,8 @@ export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
                 {showAssign ? (
                     <AssignDomainRow
                         selected={openId === "assign-domain"}
-                        onSelect={() => setOpenId("assign-domain")}
+                        onSelect={() => selectItem("assign-domain")}
+                        onHover={() => hoverItem("assign-domain")}
                         processes={inbound}
                         onAssign={assignFromSearch}
                     />
@@ -474,7 +491,8 @@ export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
                                 key={entry.id}
                                 entry={entry}
                                 selected={openId === entry.id}
-                                onSelect={() => setOpenId(entry.id)}
+                                onSelect={() => selectItem(entry.id)}
+                                onHover={() => hoverItem(entry.id)}
                                 submenu={submenuFor(entry)}
                             />
                         ))}
@@ -492,7 +510,8 @@ export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
                                 key={entry.id}
                                 entry={entry}
                                 selected={openId === entry.id}
-                                onSelect={() => setOpenId(entry.id)}
+                                onSelect={() => selectItem(entry.id)}
+                                onHover={() => hoverItem(entry.id)}
                                 submenu={submenuFor(entry)}
                             />
                         ))}
