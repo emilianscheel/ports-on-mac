@@ -185,6 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 menuSearch.restoreFocus()
             }
         }
+        lockMenuWidthIfUnfiltered(query)
     }
 
     private func replaceMenuItemsKeepingSearch(from snapshot: MenuSnapshot, query: String) {
@@ -204,6 +205,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             isSearching: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         )
         addFooterItems()
+    }
+
+    private func lockMenuWidthIfUnfiltered(_ query: String) {
+        guard query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        menu.minimumWidth = 0
+        menu.minimumWidth = ceil(menu.size.width)
     }
 
     private func addProcessSections(from snapshot: MenuSnapshot, isSearching: Bool) {
