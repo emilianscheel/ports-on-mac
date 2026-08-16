@@ -38,17 +38,17 @@ const menuFont =
 
 const menuSurface = cn(
     menuFont,
-    "w-[280px] rounded-[10px] bg-[#f6f6f6]/80 p-[5px] text-[13px] text-black/85 shadow-[0_0_0_0.5px_rgba(0,0,0,0.18),0_12px_40px_rgba(0,0,0,0.18)] backdrop-blur-xl backdrop-saturate-150",
+    "w-[280px] rounded-[10px] bg-[#f6f6f6]/80 p-[5px] text-[13px] text-black/85 shadow-[0_0_0_0.5px_rgba(0,0,0,0.18),0_12px_40px_rgba(0,0,0,0.18)] backdrop-blur-xl backdrop-saturate-150 dark:bg-[#2c2c2c]/80 dark:text-white/85 dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.18),0_12px_40px_rgba(0,0,0,0.45)]",
 );
 
 const subSurface = cn(
     menuFont,
-    "w-full rounded-[10px] bg-[#f6f6f6]/80 p-[5px] text-[13px] text-black/85 shadow-[0_0_0_0.5px_rgba(0,0,0,0.18),0_12px_40px_rgba(0,0,0,0.18)] backdrop-blur-xl backdrop-saturate-150 md:w-[220px]",
+    "w-full rounded-[10px] bg-[#f6f6f6]/80 p-[5px] text-[13px] text-black/85 shadow-[0_0_0_0.5px_rgba(0,0,0,0.18),0_12px_40px_rgba(0,0,0,0.18)] backdrop-blur-xl backdrop-saturate-150 dark:bg-[#2c2c2c]/80 dark:text-white/85 dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.18),0_12px_40px_rgba(0,0,0,0.45)] md:w-[220px]",
 );
 
 const itemClass = cn(
-    "group/item flex h-auto w-full items-center justify-start gap-2 rounded-[5px] border-0 bg-transparent px-2 py-[4px] text-left text-[13px] leading-[16px] font-normal text-black/90 shadow-none outline-none",
-    "[&_svg]:size-[14px] [&_svg]:shrink-0 [&_svg]:text-black/65",
+    "group/item flex h-auto w-full items-center justify-start gap-2 rounded-[5px] border-0 bg-transparent px-2 py-[4px] text-left text-[13px] leading-[16px] font-normal text-black/90 shadow-none outline-none dark:text-white/90",
+    "[&_svg]:size-[14px] [&_svg]:shrink-0 [&_svg]:text-black/65 dark:[&_svg]:text-white/65",
     "hover:bg-[#007AFF] hover:text-white hover:[&_svg]:text-white hover:[&_span]:text-white",
     "focus-visible:bg-[#007AFF] focus-visible:text-white focus-visible:[&_svg]:text-white focus-visible:[&_span]:text-white",
 );
@@ -56,7 +56,7 @@ const itemClass = cn(
 const selectedItemClass =
     "bg-[#007AFF] text-white [&_svg]:text-white [&_span]:text-white hover:bg-[#007AFF] hover:text-white hover:[&_span]:text-white";
 
-const separatorClass = "mx-1 my-1 h-px bg-black/10";
+const separatorClass = "mx-1 my-1 h-px bg-black/10 dark:bg-white/10";
 
 type PortEntry = {
     id: string;
@@ -181,19 +181,19 @@ function MenuSearchField({
 }) {
     return (
         <div className="flex h-7 items-center gap-2 px-2">
-            <Search className="size-[14px] shrink-0 text-black/35" />
+            <Search className="size-[14px] shrink-0 text-black/35 dark:text-white/35" />
             <input
                 value={value}
                 onChange={(event) => onChange(event.target.value)}
                 placeholder="Search"
                 spellCheck={false}
-                className="min-w-0 flex-1 translate-y-px bg-transparent text-[13px] leading-[16px] text-black/90 caret-[#8e8e93] outline-none placeholder:text-black/35 selection:bg-black/12 selection:text-inherit"
+                className="min-w-0 flex-1 translate-y-px bg-transparent text-[13px] leading-[16px] text-black/90 caret-[#8e8e93] outline-none placeholder:text-black/35 selection:bg-black/12 selection:text-inherit dark:text-white/90 dark:placeholder:text-white/35 dark:selection:bg-white/12"
             />
             {value ? (
                 <button
                     type="button"
                     onClick={() => onChange("")}
-                    className="shrink-0 text-black/35 hover:text-black/55"
+                    className="shrink-0 text-black/35 hover:text-black/55 dark:text-white/35 dark:hover:text-white/55"
                     aria-label="Clear"
                 >
                     <CircleX className="size-[14px]" />
@@ -263,7 +263,7 @@ function PortRow({
                         <span className="font-medium">{entry.domain}</span>
                         <span
                             className={cn(
-                                "text-[11px] text-black/45 group-hover/item:text-white/85 group-focus-visible/item:text-white/85",
+                                "text-[11px] text-black/45 group-hover/item:text-white/85 group-focus-visible/item:text-white/85 dark:text-white/45",
                                 selected && "text-white/85",
                             )}
                         >
@@ -278,7 +278,9 @@ function PortRow({
                 <ChevronRight
                     className={cn(
                         "ml-auto size-3.5",
-                        selected ? "text-white max-md:rotate-90" : "text-black/30",
+                        selected
+                            ? "text-white max-md:rotate-90"
+                            : "text-black/30 dark:text-white/30",
                     )}
                 />
             </MenuButton>
@@ -314,7 +316,7 @@ function PortSubmenu({
 
     return (
         <div className={subSurface}>
-            <div className="px-2.5 py-1.5 text-[11px] leading-[15px] text-black/40">
+            <div className="px-2.5 py-1.5 text-[11px] leading-[15px] text-black/40 dark:text-white/40">
                 {metadata.map(([label, value]) => (
                     <div key={label}>
                         {label}: {value}
@@ -374,7 +376,9 @@ function AssignDomainRow({
                 <ChevronRight
                     className={cn(
                         "ml-auto size-3.5",
-                        selected ? "text-white max-md:rotate-90" : "text-black/30",
+                        selected
+                            ? "text-white max-md:rotate-90"
+                            : "text-black/30 dark:text-white/30",
                     )}
                 />
             </MenuButton>
@@ -456,12 +460,12 @@ export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
         <div className="relative w-[280px] max-w-full md:w-[506px]">
             <div className={cn(menuSurface, "overflow-visible")}>
                 <div className="flex items-center gap-2 px-2 py-1.5">
-                    <span className="size-[7px] shrink-0 rounded-full bg-black/25" />
+                    <span className="size-[7px] shrink-0 rounded-full bg-black/25 dark:bg-white/25" />
                     <span className="flex min-w-0 flex-1 flex-col items-start leading-tight">
-                        <span className="text-[13px] text-black/40">
+                        <span className="text-[13px] text-black/40 dark:text-white/40">
                             Live
                         </span>
-                        <span className="text-[11px] text-black/35">
+                        <span className="text-[11px] text-black/35 dark:text-white/35">
                             12 inbound, 30 outbound
                         </span>
                     </span>
@@ -483,7 +487,7 @@ export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
 
                 {!isSearching || visibleServices.length > 0 ? (
                     <>
-                        <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-semibold tracking-wide text-black/40">
+                        <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-semibold tracking-wide text-black/40 dark:text-white/40">
                             Services
                         </div>
                         {visibleServices.map((entry) => (
@@ -502,7 +506,7 @@ export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
                 {!isSearching || visibleInbound.length > 0 ? (
                     <>
                         <div className={separatorClass} />
-                        <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-semibold tracking-wide text-black/40">
+                        <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-semibold tracking-wide text-black/40 dark:text-white/40">
                             Inbound
                         </div>
                         {visibleInbound.map((entry) => (
@@ -519,7 +523,7 @@ export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
                 ) : null}
 
                 {isSearching && !hasMatches && !showAssign ? (
-                    <div className="px-2 py-[4px] text-[13px] text-black/35">
+                    <div className="px-2 py-[4px] text-[13px] text-black/35 dark:text-white/35">
                         No Results
                     </div>
                 ) : null}
@@ -533,7 +537,7 @@ export function MacosMenu({ checkoutHref }: { checkoutHref: string }) {
                 <MenuButton className="hover:[&_span]:text-white">
                     <RefreshCw />
                     Refresh
-                    <span className="ml-auto text-[13px] text-black/35">⌘R</span>
+                    <span className="ml-auto text-[13px] text-black/35 dark:text-white/35">⌘R</span>
                 </MenuButton>
                 <MenuButton>
                     <RotateCw />

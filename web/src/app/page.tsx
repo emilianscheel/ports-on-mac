@@ -9,7 +9,7 @@ const checkoutHref = `/checkout?products=${process.env.NEXT_PUBLIC_POLAR_PRODUCT
 export default function Home() {
     return (
         <main className="grid grid-cols-1 xl:min-h-svh xl:grid-cols-2">
-            <section className="relative flex min-h-svh w-full flex-col items-center justify-center bg-white px-6">
+            <section className="relative flex min-h-svh w-full flex-col items-center justify-center bg-background px-6">
                 <div className="flex flex-col items-center">
                     <Image
                         src="/icon.png"
@@ -19,10 +19,10 @@ export default function Home() {
                         priority
                         className="size-28"
                     />
-                    <h1 className="mt-8 text-[28px] font-semibold tracking-tight text-black">
+                    <h1 className="mt-8 text-[28px] font-semibold tracking-tight text-foreground">
                         Ports on Mac
                     </h1>
-                    <p className="mt-4 max-w-[22rem] text-center text-[15px] leading-relaxed text-neutral-500">
+                    <p className="mt-4 max-w-[22rem] text-center text-[15px] leading-relaxed text-muted-foreground">
                         macos menu bar app that gives local servers real hostnames and frees
                         stuck ports
                     </p>
@@ -31,7 +31,7 @@ export default function Home() {
                             nativeButton={false}
                             variant="secondary"
                             render={<a href={downloadHref} />}
-                            className="h-10 rounded-full bg-neutral-100 px-4 text-[15px] text-black transition-colors duration-150 ease-out hover:bg-neutral-200"
+                            className="h-10 rounded-full bg-secondary px-4 text-[15px] text-secondary-foreground transition-colors duration-150 ease-out hover:bg-muted"
                         >
                             Download
                         </Button>
@@ -45,17 +45,17 @@ export default function Home() {
                                     rel="noopener noreferrer"
                                 />
                             }
-                            className="h-10 rounded-full bg-transparent px-4 text-[15px] text-black transition-colors duration-150 ease-out hover:bg-neutral-100"
+                            className="h-10 rounded-full bg-transparent px-4 text-[15px] text-foreground transition-colors duration-150 ease-out hover:bg-muted"
                         >
                             Buy
                         </Button>
                     </div>
                 </div>
-                <p className="absolute inset-x-0 bottom-[max(2rem,env(safe-area-inset-bottom,0px))] text-center text-sm text-neutral-400">
+                <p className="absolute inset-x-0 bottom-[max(2rem,env(safe-area-inset-bottom,0px))] text-center text-sm text-muted-foreground">
                     7 trial days · $10 one time
                 </p>
             </section>
-            <aside className="flex min-h-svh w-full items-center justify-center bg-neutral-100 px-6 py-24 xl:py-16">
+            <aside className="flex min-h-svh w-full items-center justify-center bg-muted px-6 py-24 xl:py-16">
                 <MacosMenu checkoutHref={checkoutHref} />
             </aside>
         </main>
